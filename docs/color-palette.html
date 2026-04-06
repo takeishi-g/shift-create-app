@@ -18,7 +18,6 @@
     .hex { font-size: 12px; color: #9CA3AF; font-family: monospace; }
     .role { font-size: 11px; color: #F9A8D4; margin-top: 2px; }
 
-    /* シフト表プレビュー */
     .shift-table { background:#fff; border:1px solid #FCE7F3; border-radius:12px; overflow:hidden; max-width:640px; box-shadow:0 2px 8px rgba(244,63,94,.08); }
     .shift-header { padding:16px 20px; border-bottom:1px solid #FCE7F3; font-weight:700; font-size:14px; background: linear-gradient(135deg, #FFF1F2, #FDF2F8); color: #BE185D; }
     table { border-collapse:collapse; width:100%; font-size:12px; }
@@ -26,7 +25,16 @@
     th:first-child { padding:8px 16px; text-align:left; }
     td { padding:6px 4px; text-align:center; border-bottom:1px solid #FFF1F2; }
     td:first-child { padding:6px 16px; text-align:left; font-weight:500; color:#374151; }
-    .badge { display:inline-block; border-radius:6px; padding:3px 7px; font-size:11px; font-weight:700; }
+
+    /* 色あり（目立たせる） */
+    .badge-color { display:inline-block; border-radius:6px; padding:3px 7px; font-size:11px; font-weight:700; }
+    /* 日勤：控えめ */
+    .badge-day { display:inline-block; border-radius:6px; padding:3px 7px; font-size:11px; font-weight:500; background:#F0FDF4; color:#15803D; border:1px solid #BBF7D0; }
+    /* 休み系：テキストのみ */
+    .badge-off { display:inline-block; padding:3px 4px; font-size:11px; color:#9CA3AF; }
+
+    .legend { display:flex; flex-wrap:wrap; gap:12px; padding:16px 20px; border-top:1px solid #FCE7F3; background:#FFF7FB; }
+    .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#4B5563; }
   </style>
 </head>
 <body>
@@ -42,7 +50,7 @@
     </div>
     <div class="card">
       <div class="swatch" style="background:linear-gradient(135deg,#FFF1F2,#FDF2F8);"></div>
-      <div class="info"><div class="name">Rose-50 / Pink-50</div><div class="hex">#FFF1F2 / #FDF2F8</div><div class="role">ページ背景（グラデーション）</div></div>
+      <div class="info"><div class="name">Rose-50 / Pink-50</div><div class="hex">#FFF1F2 / #FDF2F8</div><div class="role">ページ背景</div></div>
     </div>
     <div class="card">
       <div class="swatch" style="background:#FFFFFF; border-bottom:1px solid #FCE7F3;"></div>
@@ -77,12 +85,8 @@
   <h2>シフト種別カラー</h2>
   <div class="grid">
     <div class="card">
-      <div class="swatch" style="background:#38BDF8;"></div>
-      <div class="info"><div class="name">早番</div><div class="hex">#38BDF8</div><div class="role">Sky-400</div></div>
-    </div>
-    <div class="card">
       <div class="swatch" style="background:#34D399;"></div>
-      <div class="info"><div class="name">日勤</div><div class="hex">#34D399</div><div class="role">Emerald-400</div></div>
+      <div class="info"><div class="name">日勤</div><div class="hex">#34D399</div><div class="role">Emerald-400（控えめ表示）</div></div>
     </div>
     <div class="card">
       <div class="swatch" style="background:#FB923C;"></div>
@@ -94,19 +98,20 @@
     </div>
     <div class="card">
       <div class="swatch" style="background:#C7D2FE;"></div>
-      <div class="info"><div class="name">明け</div><div class="hex">#C7D2FE</div><div class="role">Indigo-200</div></div>
+      <div class="info"><div class="name">明け</div><div class="hex">#C7D2FE</div><div class="role">Indigo-200（テキストのみ）</div></div>
     </div>
     <div class="card">
       <div class="swatch" style="background:#FBCFE8;"></div>
-      <div class="info"><div class="name">公休</div><div class="hex">#FBCFE8</div><div class="role">Pink-200</div></div>
+      <div class="info"><div class="name">公休</div><div class="hex">#FBCFE8</div><div class="role">Pink-200（テキストのみ）</div></div>
     </div>
     <div class="card">
       <div class="swatch" style="background:#FCD34D;"></div>
-      <div class="info"><div class="name">有給</div><div class="hex">#FCD34D</div><div class="role">Yellow-300</div></div>
+      <div class="info"><div class="name">有給</div><div class="hex">#FCD34D</div><div class="role">Yellow-300（テキストのみ）</div></div>
     </div>
   </div>
 
-  <h2>シフト表プレビュー</h2>
+  <h2>シフト表プレビュー（視認性改善版）</h2>
+  <p style="font-size:12px;color:#9CA3AF;margin-bottom:12px;">夜勤・遅番のみ色付き → 日勤は控えめ → 休みはテキストのみ</p>
   <div class="shift-table">
     <div class="shift-header">🌸 2026年4月 シフト表</div>
     <div style="overflow-x:auto;">
@@ -120,36 +125,42 @@
         <tbody>
           <tr>
             <td>山田 太郎</td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
-            <td><span class="badge" style="background:#C084FC;color:#fff;">夜</span></td>
-            <td><span class="badge" style="background:#C7D2FE;color:#4338CA;">明</span></td>
-            <td><span class="badge" style="background:#FBCFE8;color:#BE185D;">休</span></td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
-            <td><span class="badge" style="background:#38BDF8;color:#fff;">早</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-off">明</span></td>
+            <td><span class="badge-off">休</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
           </tr>
           <tr>
             <td>鈴木 花子</td>
-            <td><span class="badge" style="background:#38BDF8;color:#fff;">早</span></td>
-            <td><span class="badge" style="background:#FB923C;color:#fff;">遅</span></td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
-            <td><span class="badge" style="background:#C084FC;color:#fff;">夜</span></td>
-            <td><span class="badge" style="background:#C7D2FE;color:#4338CA;">明</span></td>
-            <td><span class="badge" style="background:#FBCFE8;color:#BE185D;">休</span></td>
-            <td><span class="badge" style="background:#FCD34D;color:#92400E;">有</span></td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-off">明</span></td>
+            <td><span class="badge-off">休</span></td>
+            <td><span class="badge-off" style="color:#CA8A04;">有</span></td>
           </tr>
           <tr>
             <td>田中 一郎</td>
-            <td><span class="badge" style="background:#C084FC;color:#fff;">夜</span></td>
-            <td><span class="badge" style="background:#C7D2FE;color:#4338CA;">明</span></td>
-            <td><span class="badge" style="background:#FBCFE8;color:#BE185D;">休</span></td>
-            <td><span class="badge" style="background:#38BDF8;color:#fff;">早</span></td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
-            <td><span class="badge" style="background:#FB923C;color:#fff;">遅</span></td>
-            <td><span class="badge" style="background:#34D399;color:#fff;">日</span></td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-off">明</span></td>
+            <td><span class="badge-off">休</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-day">日</span></td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
+            <td><span class="badge-day">日</span></td>
           </tr>
         </tbody>
       </table>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="badge-color" style="background:#C084FC;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;">夜</span> 夜勤</div>
+      <div class="legend-item"><span class="badge-color" style="background:#FB923C;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;">遅</span> 遅番</div>
+      <div class="legend-item"><span class="badge-day">日</span> 日勤</div>
+      <div class="legend-item"><span class="badge-off">明 / 休 / 有</span> 明け・公休・有給</div>
     </div>
   </div>
 
