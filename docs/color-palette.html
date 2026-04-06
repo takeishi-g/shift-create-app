@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>カラーパレット - 病棟シフト作成アプリ</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background: #F9FAFB; color: #111827; padding: 40px 24px; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    p.subtitle { color: #6B7280; font-size: 14px; margin-bottom: 40px; }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; margin-top: 40px; color: #374151; border-bottom: 1px solid #E5E7EB; padding-bottom: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+    .card { border-radius: 12px; overflow: hidden; border: 1px solid #E5E7EB; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    .swatch { height: 80px; }
+    .info { padding: 12px; }
+    .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .hex { font-size: 12px; color: #6B7280; font-family: monospace; }
+    .role { font-size: 11px; color: #9CA3AF; margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+  <h1>🎨 カラーパレット</h1>
+  <p class="subtitle">病棟シフト作成アプリ / デザイン仕様書</p>
+
+  <h2>ベースカラー</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="swatch" style="background:#3B82F6;"></div>
+      <div class="info"><div class="name">Slate Blue</div><div class="hex">#3B82F6</div><div class="role">プライマリ</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FFFFFF; border-bottom:1px solid #E5E7EB;"></div>
+      <div class="info"><div class="name">White</div><div class="hex">#FFFFFF</div><div class="role">背景 / カード</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#F9FAFB;"></div>
+      <div class="info"><div class="name">Gray-50</div><div class="hex">#F9FAFB</div><div class="role">ページ背景</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#111827;"></div>
+      <div class="info"><div class="name">Gray-900</div><div class="hex">#111827</div><div class="role">テキスト（メイン）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#6B7280;"></div>
+      <div class="info"><div class="name">Gray-500</div><div class="hex">#6B7280</div><div class="role">テキスト（サブ）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#E5E7EB;"></div>
+      <div class="info"><div class="name">Gray-200</div><div class="hex">#E5E7EB</div><div class="role">ボーダー</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#22C55E;"></div>
+      <div class="info"><div class="name">Green-500</div><div class="hex">#22C55E</div><div class="role">成功</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#EAB308;"></div>
+      <div class="info"><div class="name">Yellow-500</div><div class="hex">#EAB308</div><div class="role">警告</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#EF4444;"></div>
+      <div class="info"><div class="name">Red-500</div><div class="hex">#EF4444</div><div class="role">エラー</div></div>
+    </div>
+  </div>
+
+  <h2>シフト種別カラー</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="swatch" style="background:#3B82F6;"></div>
+      <div class="info"><div class="name">早番</div><div class="hex">#3B82F6</div><div class="role">blue-500</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#22C55E;"></div>
+      <div class="info"><div class="name">日勤</div><div class="hex">#22C55E</div><div class="role">green-500</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#F97316;"></div>
+      <div class="info"><div class="name">遅番</div><div class="hex">#F97316</div><div class="role">orange-500</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#8B5CF6;"></div>
+      <div class="info"><div class="name">夜勤</div><div class="hex">#8B5CF6</div><div class="role">purple-500</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#94A3B8;"></div>
+      <div class="info"><div class="name">明け</div><div class="hex">#94A3B8</div><div class="role">slate-400</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#E5E7EB;"></div>
+      <div class="info"><div class="name">公休</div><div class="hex">#E5E7EB</div><div class="role">gray-200</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FDE68A;"></div>
+      <div class="info"><div class="name">有給</div><div class="hex">#FDE68A</div><div class="role">yellow-200</div></div>
+    </div>
+  </div>
+
+  <h2>シフト表プレビュー</h2>
+  <div style="background:#fff; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; max-width:600px;">
+    <div style="padding:16px; border-bottom:1px solid #E5E7EB; font-weight:600; font-size:14px;">2026年4月 シフト表</div>
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse; width:100%; font-size:12px;">
+        <thead>
+          <tr style="background:#F9FAFB;">
+            <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #E5E7EB; font-weight:600; min-width:80px;">氏名</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">1</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">2</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">3</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">4</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">5</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">6</th>
+            <th style="padding:8px 6px; border-bottom:1px solid #E5E7EB; font-weight:600;">7</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:8px 12px; border-bottom:1px solid #F3F4F6; font-weight:500;">山田 太郎</td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#8B5CF6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">夜</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#94A3B8;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">明</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#E5E7EB;color:#374151;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">休</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#3B82F6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">早</span></td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; border-bottom:1px solid #F3F4F6; font-weight:500;">鈴木 花子</td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#3B82F6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">早</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#F97316;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">遅</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#8B5CF6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">夜</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#94A3B8;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">明</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#E5E7EB;color:#374151;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">休</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#FDE68A;color:#374151;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">有</span></td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; font-weight:500;">田中 一郎</td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#8B5CF6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">夜</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#94A3B8;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">明</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#E5E7EB;color:#374151;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">休</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#3B82F6;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">早</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#F97316;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">遅</span></td>
+            <td style="padding:4px; text-align:center;"><span style="display:inline-block;background:#22C55E;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;">日</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p style="margin-top:48px; font-size:12px; color:#9CA3AF;">shift-create-app / docs / color-palette.html</p>
+
+</body>
+</html>
