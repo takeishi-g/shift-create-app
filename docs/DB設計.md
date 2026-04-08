@@ -24,23 +24,23 @@ skill_shift_requirements（シフト別スキル要件）
 ## テーブル定義
 
 ### 1. users（認証・アカウント）
-Supabase Auth と連携。auth.users を拡張する形で管理。
+Supabase Auth と連携。管理者のみが使用するシングルロール構成。
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
 | id | uuid PK | auth.users.id と一致 |
-| role | text | `admin` / `staff` |
 | created_at | timestamptz | 作成日時 |
+
+※ スタッフはアプリにログインしない。管理者（師長）のみが使用する。
 
 ---
 
 ### 2. staff_profiles（スタッフ情報）
-条件 a: スタッフ情報
+条件 a: スタッフ情報（管理者が登録・管理する）
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
 | id | uuid PK | |
-| user_id | uuid FK → users.id | |
 | name | text NOT NULL | 氏名 |
 | employment_type | text | `full_time` / `part_time` / `dispatch` |
 | max_hours_per_month | int | 月間最大勤務時間 |
@@ -144,10 +144,11 @@ Supabase Auth と連携。auth.users を拡張する形で管理。
 | staff_id | uuid FK → staff_profiles.id | |
 | date | date NOT NULL | 希望日 |
 | type | text | `希望休` / `有給` / `特別休暇` |
-| status | text DEFAULT 'pending' | `pending` / `approved` / `rejected` |
 | note | text | 備考 |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+
+※ 管理者がスタッフから口頭・紙で収集して代理入力する。承認ワークフロー不要。
 
 ---
 
@@ -235,13 +236,15 @@ UNIQUE(schedule_month_id, staff_id, date)
 
 ## RLS（行レベルセキュリティ）方針
 
-| テーブル | admin | staff |
-|---------|-------|-------|
-| staff_profiles | 全操作 | 自分のみ読み取り |
-| leave_requests | 全操作 | 自分のみ全操作 |
-| shift_assignments | 全操作 | 読み取りのみ |
-| schedule_months | 全操作 | 読み取りのみ |
-| shift_types / shift_constraints | 全操作 | 読み取りのみ |
+管理者のみがアプリを使用するシングルロール構成のため、認証済みユーザー（管理者）は全テーブルに対して全操作可能。
+
+| テーブル | 認証済み管理者 |
+|---------|--------------|
+| staff_profiles | 全操作 |
+| leave_requests | 全操作 |
+| shift_assignments | 全操作 |
+| schedule_months | 全操作 |
+| shift_types / shift_constraints | 全操作 |
 
 ---
 
