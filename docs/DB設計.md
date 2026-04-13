@@ -135,24 +135,32 @@ Supabase Auth と連携。管理者のみが使用するシングルロール構
 
 ---
 
-### 9. leave_requests（希望休・有給申請）
-条件 c: 希望休・有給申請
+### 9. leave_requests（勤務希望）
+条件 c: 希望休・有給申請・シフト希望
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
 | id | uuid PK | |
 | staff_id | uuid FK → staff_profiles.id | |
 | date | date NOT NULL | 希望日 |
-| type | text | `希望休` / `有給` / `特別休暇` |
+| type | text | `希望休` / `有給` / `特別休暇` / `シフト希望` |
+| preferred_shift_type_id | uuid FK → shift_types.id | `type = 'シフト希望'` の場合に希望するシフト種別（例: 夜勤）。それ以外は NULL |
 | note | text | 備考 |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 
 ※ 管理者がスタッフから口頭・紙で収集して代理入力する。承認ワークフロー不要。
 
+**種別ごとのソルバーへの影響**
+
+| type | preferred_shift_type_id | ソルバーでの扱い |
+|------|------------------------|----------------|
+| 希望休 / 有給 / 特別休暇 | NULL | ハード制約 H3：対象日に勤務シフトを割り当て禁止 |
+| シフト希望 | 夜勤など（shift_type_id） | ソフト制約 S5：対象日に指定シフトをできるだけ割り当て |
+
 ---
 
-### 9. schedule_months（月次スケジュールヘッダー）
+### 10. schedule_months（月次スケジュールヘッダー）
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
@@ -168,7 +176,7 @@ UNIQUE(year, month)
 
 ---
 
-### 10. shift_assignments（シフト割り当て：自動生成結果）
+### 11. shift_assignments（シフト割り当て：自動生成結果）
 
 | カラム | 型 | 説明 |
 |--------|-----|------|
