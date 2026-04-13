@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>カラーパレット - 病棟シフト作成アプリ</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background: #FFF1F2; color: #1F2937; padding: 40px 24px; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    p.subtitle { color: #9CA3AF; font-size: 14px; margin-bottom: 40px; }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; margin-top: 40px; color: #4B5563; border-bottom: 1px solid #FBCFE8; padding-bottom: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+    .card { border-radius: 12px; overflow: hidden; border: 1px solid #FCE7F3; background: #fff; box-shadow: 0 1px 4px rgba(244,63,94,.08); }
+    .swatch { height: 80px; }
+    .info { padding: 12px; }
+    .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .hex { font-size: 12px; color: #9CA3AF; font-family: monospace; }
+    .role { font-size: 11px; color: #F9A8D4; margin-top: 2px; }
+
+    .shift-table { background:#fff; border:1px solid #FCE7F3; border-radius:12px; overflow:hidden; max-width:640px; box-shadow:0 2px 8px rgba(244,63,94,.08); }
+    .shift-header { padding:16px 20px; border-bottom:1px solid #FCE7F3; font-weight:700; font-size:14px; background: linear-gradient(135deg, #FFF1F2, #FDF2F8); color: #BE185D; }
+    table { border-collapse:collapse; width:100%; font-size:12px; }
+    th { padding:8px 6px; border-bottom:1px solid #FCE7F3; font-weight:600; color:#6B7280; background:#FFF7FB; }
+    th:first-child { padding:8px 16px; text-align:left; }
+    td { padding:6px 4px; text-align:center; border-bottom:1px solid #FFF1F2; }
+    td:first-child { padding:6px 16px; text-align:left; font-weight:500; color:#374151; }
+
+    /* 色あり（目立たせる） */
+    .badge-color { display:inline-block; border-radius:6px; padding:3px 7px; font-size:11px; font-weight:700; }
+    /* 日勤：控えめ */
+    .badge-day { display:inline-block; border-radius:6px; padding:3px 7px; font-size:11px; font-weight:500; background:#F0FDF4; color:#15803D; border:1px solid #BBF7D0; }
+    /* 休み系：テキストのみ */
+    .badge-off { display:inline-block; padding:3px 4px; font-size:11px; color:#9CA3AF; }
+
+    .legend { display:flex; flex-wrap:wrap; gap:12px; padding:16px 20px; border-top:1px solid #FCE7F3; background:#FFF7FB; }
+    .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#4B5563; }
+  </style>
+</head>
+<body>
+
+  <h1>🌸 カラーパレット</h1>
+  <p class="subtitle">病棟シフト作成アプリ / デザイン仕様書（女性向け・華やか系）</p>
+
+  <h2>ベースカラー</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="swatch" style="background:#F43F5E;"></div>
+      <div class="info"><div class="name">Rose-500</div><div class="hex">#F43F5E</div><div class="role">プライマリ</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:linear-gradient(135deg,#FFF1F2,#FDF2F8);"></div>
+      <div class="info"><div class="name">Rose-50 / Pink-50</div><div class="hex">#FFF1F2 / #FDF2F8</div><div class="role">ページ背景</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FFFFFF; border-bottom:1px solid #FCE7F3;"></div>
+      <div class="info"><div class="name">White</div><div class="hex">#FFFFFF</div><div class="role">カード背景</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#1F2937;"></div>
+      <div class="info"><div class="name">Gray-800</div><div class="hex">#1F2937</div><div class="role">テキスト（メイン）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#9CA3AF;"></div>
+      <div class="info"><div class="name">Gray-400</div><div class="hex">#9CA3AF</div><div class="role">テキスト（サブ）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FCE7F3;"></div>
+      <div class="info"><div class="name">Pink-100</div><div class="hex">#FCE7F3</div><div class="role">ボーダー</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#10B981;"></div>
+      <div class="info"><div class="name">Emerald-500</div><div class="hex">#10B981</div><div class="role">成功</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FBBF24;"></div>
+      <div class="info"><div class="name">Amber-400</div><div class="hex">#FBBF24</div><div class="role">警告</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#F43F5E;"></div>
+      <div class="info"><div class="name">Rose-500</div><div class="hex">#F43F5E</div><div class="role">エラー</div></div>
+    </div>
+  </div>
+
+  <h2>シフト種別カラー</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="swatch" style="background:#38BDF8;"></div>
+      <div class="info"><div class="name">早番</div><div class="hex">#38BDF8</div><div class="role">Sky-400（色付きバッジ）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#34D399;"></div>
+      <div class="info"><div class="name">日勤</div><div class="hex">#34D399</div><div class="role">Emerald-400（控えめ表示）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FB923C;"></div>
+      <div class="info"><div class="name">遅番</div><div class="hex">#FB923C</div><div class="role">Orange-400</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#C084FC;"></div>
+      <div class="info"><div class="name">夜勤</div><div class="hex">#C084FC</div><div class="role">Purple-400</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#C7D2FE;"></div>
+      <div class="info"><div class="name">明け</div><div class="hex">#C7D2FE</div><div class="role">Indigo-200（テキストのみ）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FBCFE8;"></div>
+      <div class="info"><div class="name">公休</div><div class="hex">#FBCFE8</div><div class="role">Pink-200（テキストのみ）</div></div>
+    </div>
+    <div class="card">
+      <div class="swatch" style="background:#FCD34D;"></div>
+      <div class="info"><div class="name">有給</div><div class="hex">#FCD34D</div><div class="role">Yellow-300（テキストのみ）</div></div>
+    </div>
+  </div>
+
+  <h2>シフト表プレビュー（視認性改善版）</h2>
+  <p style="font-size:12px;color:#9CA3AF;margin-bottom:12px;">夜勤・遅番のみ色付き → 日勤は控えめ → 休みはテキストのみ</p>
+  <div class="shift-table">
+    <div class="shift-header">🌸 2026年4月 シフト表</div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>氏名</th>
+            <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>山田 太郎</td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-color" style="background:#C7D2FE;color:#4338CA;">明</span></td>
+            <td><span class="badge-color" style="background:#FBCFE8;color:#BE185D;">休</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
+          </tr>
+          <tr>
+            <td>鈴木 花子</td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-color" style="background:#C7D2FE;color:#4338CA;">明</span></td>
+            <td><span class="badge-color" style="background:#FBCFE8;color:#BE185D;">休</span></td>
+            <td><span class="badge-color" style="background:#FCD34D;color:#92400E;">有</span></td>
+          </tr>
+          <tr>
+            <td>田中 一郎</td>
+            <td><span class="badge-color" style="background:#C084FC;color:#fff;">夜</span></td>
+            <td><span class="badge-color" style="background:#C7D2FE;color:#4338CA;">明</span></td>
+            <td><span class="badge-color" style="background:#FBCFE8;color:#BE185D;">休</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-off">日</span></td>
+            <td><span class="badge-color" style="background:#FB923C;color:#fff;">遅</span></td>
+            <td><span class="badge-off">日</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="badge-color" style="background:#38BDF8;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;">早</span> 早番</div>
+      <div class="legend-item"><span class="badge-color" style="background:#C084FC;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;">夜</span> 夜勤</div>
+      <div class="legend-item"><span class="badge-color" style="background:#FB923C;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;">遅</span> 遅番</div>
+      <div class="legend-item"><span class="badge-off">日</span> 日勤</div>
+      <div class="legend-item"><span class="badge-color" style="background:#C7D2FE;color:#4338CA;border-radius:4px;padding:2px 6px;font-size:11px;">明</span> 明け</div>
+      <div class="legend-item"><span class="badge-color" style="background:#FBCFE8;color:#BE185D;border-radius:4px;padding:2px 6px;font-size:11px;">休</span> 公休</div>
+      <div class="legend-item"><span class="badge-color" style="background:#FCD34D;color:#92400E;border-radius:4px;padding:2px 6px;font-size:11px;">有</span> 有給</div>
+    </div>
+  </div>
+
+  <p style="margin-top:48px; font-size:12px; color:#F9A8D4;">shift-create-app / docs / color-palette.html</p>
+
+</body>
+</html>
