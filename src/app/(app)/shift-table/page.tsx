@@ -189,7 +189,7 @@ export default function ShiftTablePage() {
 
       {/* テーブル本体 */}
       <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
-        <table className="border-collapse text-xs" style={{ minWidth: 'max-content' }}>
+        <table className="border-collapse text-xs w-full" style={{ minWidth: 'max-content' }}>
           <thead>
             {/* お風呂の日ヘッダー */}
             <tr>
