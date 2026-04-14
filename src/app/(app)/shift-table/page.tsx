@@ -161,7 +161,7 @@ export default function ShiftTablePage() {
   }, [days, rows])
 
   return (
-    <div className="h-full flex flex-col gap-3 p-4">
+    <div className="flex-1 flex flex-col gap-3 p-4 min-h-0">
       {/* ヘッダー */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">

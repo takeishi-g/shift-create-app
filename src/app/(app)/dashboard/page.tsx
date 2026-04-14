@@ -63,7 +63,7 @@ const QUICK_ACTIONS = [
 
 export default function DashboardPage() {
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className="flex-1 overflow-y-auto p-6 space-y-6">
       {/* KPI カード */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* 今月のスタッフ数 */}

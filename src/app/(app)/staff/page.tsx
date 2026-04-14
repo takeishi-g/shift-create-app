@@ -75,7 +75,7 @@ export default function StaffPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5">
+    <div className="flex-1 overflow-y-auto p-6 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">スタッフ管理</h1>
         <button

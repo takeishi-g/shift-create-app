@@ -55,7 +55,7 @@ export default function SchedulerPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6 max-w-lg">
+    <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-lg">
       {/* ページヘッダー */}
       <h1 className="text-xl font-bold text-gray-900">シフト自動生成</h1>
 
