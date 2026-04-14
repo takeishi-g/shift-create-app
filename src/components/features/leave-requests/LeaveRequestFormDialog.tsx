@@ -139,6 +139,7 @@ export function LeaveRequestFormDialog({
                 <SelectItem value="有給">有給</SelectItem>
                 <SelectItem value="特別休暇">特別休暇</SelectItem>
                 <SelectItem value="シフト希望">シフト希望</SelectItem>
+                <SelectItem value="他">その他（産休・退職など）</SelectItem>
               </SelectContent>
             </Select>
           </div>

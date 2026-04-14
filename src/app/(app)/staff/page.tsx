@@ -11,62 +11,56 @@ import { StaffProfile } from '@/types'
 // ------
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
 // ------
-interface Skill { id: string; name: string }
-interface StaffWithSkills extends StaffProfile { skills: Skill[] }
-
-const MOCK_SKILLS: Skill[] = [
-  { id: 'sk-1', name: 'ICU対応' },
-  { id: 'sk-2', name: '救急リーダー' },
-  { id: 'sk-3', name: 'NICU対応' },
-]
-
-const MOCK_STAFF: StaffWithSkills[] = [
-  { id: 'st-1', name: '山田 太郎', employment_type: 'full_time', experience_years: 5, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '', skills: [MOCK_SKILLS[0]] },
-  { id: 'st-2', name: '鈴木 花子', employment_type: 'part_time', experience_years: 2, max_hours_per_month: 100, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '', skills: [] },
-  { id: 'st-3', name: '田中 一郎', employment_type: 'full_time', experience_years: 8, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '', skills: [MOCK_SKILLS[0], MOCK_SKILLS[1]] },
-  { id: 'st-4', name: '佐藤 美咲', employment_type: 'dispatch', experience_years: 3, max_hours_per_month: 120, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '', skills: [] },
-  { id: 'st-5', name: '伊藤 健二', employment_type: 'full_time', experience_years: 1, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '', skills: [] },
+const MOCK_STAFF: StaffProfile[] = [
+  { id: 'st-1', name: '山田 太郎', qualification: '正看護師', role: '師長', work_hours_type: 'AM', experience_years: 10, max_hours_per_month: 160, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-2', name: '鈴木 花子', qualification: '正看護師', role: '主任', work_hours_type: 'AM', experience_years: 7, max_hours_per_month: 160, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-3', name: '田中 一郎', qualification: '正看護師', role: '一般', work_hours_type: 'AM', experience_years: 5, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-4', name: '佐藤 美咲', qualification: '准看護師', role: '一般', work_hours_type: 'PM', experience_years: 3, max_hours_per_month: 120, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-5', name: '伊藤 健二', qualification: '准看護師', role: '一般', work_hours_type: 'PM', experience_years: 1, max_hours_per_month: 100, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
 ]
 
 let nextId = 100
 
+type StaffFormData = {
+  name: string
+  qualification: StaffProfile['qualification']
+  role: StaffProfile['role']
+  work_hours_type: StaffProfile['work_hours_type']
+  experience_years: number
+  max_hours_per_month: number
+  max_night_shifts: number
+}
+
 export default function StaffPage() {
-  const [staffList, setStaffList] = useState<StaffWithSkills[]>(MOCK_STAFF)
+  const [staffList, setStaffList] = useState<StaffProfile[]>(MOCK_STAFF)
   const [search, setSearch] = useState('')
   const [formOpen, setFormOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<StaffWithSkills | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<StaffWithSkills | null>(null)
+  const [editTarget, setEditTarget] = useState<StaffProfile | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<StaffProfile | null>(null)
 
   const filtered = useMemo(
     () => staffList.filter((s) => s.name.includes(search)),
     [staffList, search]
   )
 
-  function handleAdd(data: { name: string; employment_type: string; experience_years: number; max_hours_per_month: number; max_night_shifts: number; skill_ids: string[] }) {
-    const skills = MOCK_SKILLS.filter((sk) => data.skill_ids.includes(sk.id))
-    const newStaff: StaffWithSkills = {
+  function handleAdd(data: StaffFormData) {
+    const newStaff: StaffProfile = {
       id: `st-${nextId++}`,
-      name: data.name,
-      employment_type: data.employment_type as StaffProfile['employment_type'],
-      experience_years: data.experience_years,
-      max_hours_per_month: data.max_hours_per_month,
-      max_night_shifts: data.max_night_shifts,
+      ...data,
       is_active: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      skills,
     }
     setStaffList((prev) => [...prev, newStaff])
     setFormOpen(false)
   }
 
-  function handleEdit(data: { name: string; employment_type: string; experience_years: number; max_hours_per_month: number; max_night_shifts: number; skill_ids: string[] }) {
+  function handleEdit(data: StaffFormData) {
     if (!editTarget) return
-    const skills = MOCK_SKILLS.filter((sk) => data.skill_ids.includes(sk.id))
     setStaffList((prev) =>
       prev.map((s) =>
         s.id === editTarget.id
-          ? { ...s, ...data, employment_type: data.employment_type as StaffProfile['employment_type'], skills, updated_at: new Date().toISOString() }
+          ? { ...s, ...data, updated_at: new Date().toISOString() }
           : s
       )
     )
@@ -82,7 +76,6 @@ export default function StaffPage() {
 
   return (
     <div className="space-y-5">
-      {/* ページヘッダー */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">スタッフ管理</h1>
         <button
@@ -94,7 +87,6 @@ export default function StaffPage() {
         </button>
       </div>
 
-      {/* 検索バー */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
         <Input
@@ -105,23 +97,19 @@ export default function StaffPage() {
         />
       </div>
 
-      {/* テーブル */}
       <StaffTable
         staff={filtered}
         onEdit={(s) => { setEditTarget(s); setFormOpen(true) }}
         onDelete={(s) => setDeleteTarget(s)}
       />
 
-      {/* 追加・編集ダイアログ */}
       <StaffFormDialog
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditTarget(null) }}
         onSubmit={editTarget ? handleEdit : handleAdd}
         initialData={editTarget}
-        availableSkills={MOCK_SKILLS}
       />
 
-      {/* 削除確認ダイアログ */}
       <DeleteConfirmDialog
         open={!!deleteTarget}
         targetName={deleteTarget?.name ?? ''}

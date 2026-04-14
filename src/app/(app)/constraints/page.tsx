@@ -13,10 +13,10 @@ import { PairConstraintDialog, PairConstraintFormData } from '@/components/featu
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
 // ------
 const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '山田 太郎', employment_type: 'full_time', experience_years: 5, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '鈴木 花子', employment_type: 'part_time', experience_years: 2, max_hours_per_month: 100, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '田中 一郎', employment_type: 'full_time', experience_years: 8, max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '佐藤 美咲', employment_type: 'dispatch', experience_years: 3, max_hours_per_month: 120, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長',  work_hours_type: 'AM', experience_years: 15, max_hours_per_month: 160, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任',  work_hours_type: 'AM', experience_years: 12, max_hours_per_month: 160, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般',  work_hours_type: 'AM', experience_years: 8,  max_hours_per_month: 160, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-4', name: '伊藤 健二',  qualification: '准看護師', role: '一般',  work_hours_type: 'PM', experience_years: 4,  max_hours_per_month: 120, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
 ]
 
 interface MinStaffing {
@@ -31,6 +31,8 @@ interface WorkRules {
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
   max_night_shifts_per_month: number
+  min_staff_weekend: number
+  min_staff_bath_day: number
 }
 
 const INITIAL_MIN_STAFFING: MinStaffing = {
@@ -45,11 +47,13 @@ const INITIAL_WORK_RULES: WorkRules = {
   min_rest_hours_after_night: 11,
   auto_insert_off_after_night: true,
   max_night_shifts_per_month: 4,
+  min_staff_weekend: 3,
+  min_staff_bath_day: 4,
 }
 
 const INITIAL_PAIRS: StaffPairConstraint[] = [
-  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair', shift_type_id: null, note: '追加のみ', created_at: '' },
-  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: null, note: '全シフト', created_at: '' },
+  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair',     shift_type_id: null, note: null, created_at: '' },
+  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: null, note: null, created_at: '' },
 ]
 
 let nextPairId = 100
@@ -79,7 +83,6 @@ export default function ConstraintsPage() {
   const [saved, setSaved] = useState(false)
 
   function handleSave() {
-    // TODO: Supabase に保存
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -98,10 +101,6 @@ export default function ConstraintsPage() {
     setPairDialogOpen(false)
   }
 
-  function handleDeletePair(id: string) {
-    setPairs((prev) => prev.filter((p) => p.id !== id))
-  }
-
   function setMinStaffingField(key: keyof MinStaffing, val: number) {
     setMinStaffing((prev) => ({ ...prev, [key]: val }))
   }
@@ -118,9 +117,7 @@ export default function ConstraintsPage() {
         <button
           onClick={handleSave}
           className={`px-5 py-2 text-sm font-semibold rounded-lg transition-colors ${
-            saved
-              ? 'bg-green-500 text-white'
-              : 'bg-rose-500 hover:bg-rose-600 text-white'
+            saved ? 'bg-green-500 text-white' : 'bg-rose-500 hover:bg-rose-600 text-white'
           }`}
         >
           {saved ? '保存しました' : '保存する'}
@@ -135,9 +132,7 @@ export default function ConstraintsPage() {
             <div key={shift} className="flex items-center gap-2">
               <Label className="w-10 text-sm text-gray-600 shrink-0">{shift}</Label>
               <Input
-                type="number"
-                min={0}
-                max={20}
+                type="number" min={0} max={20}
                 value={minStaffing[shift]}
                 onChange={(e) => setMinStaffingField(shift, Number(e.target.value))}
                 className="w-16 text-center"
@@ -146,41 +141,50 @@ export default function ConstraintsPage() {
             </div>
           ))}
         </div>
+
+        {/* 土日・お風呂の日 */}
+        <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-x-8 gap-y-4">
+          <div className="flex items-center gap-2">
+            <Label className="w-24 text-sm text-gray-600 shrink-0">土日最低人数</Label>
+            <Input
+              type="number" min={0} max={20}
+              value={workRules.min_staff_weekend}
+              onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
+              className="w-16 text-center"
+            />
+            <span className="text-sm text-gray-500">人</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の日人数</Label>
+            <Input
+              type="number" min={0} max={20}
+              value={workRules.min_staff_bath_day}
+              onChange={(e) => setWorkRulesField('min_staff_bath_day', Number(e.target.value))}
+              className="w-16 text-center"
+            />
+            <span className="text-sm text-gray-500">人</span>
+          </div>
+        </div>
       </section>
 
       {/* 勤怠ルール */}
       <section className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
         <h2 className="text-sm font-semibold text-gray-700">勤怠ルール</h2>
         <div className="space-y-4">
-          {/* 連勤最大上限 */}
           <div className="flex items-center gap-3">
             <Label className="w-44 text-sm text-gray-600 shrink-0">連勤最大上限</Label>
-            <Input
-              type="number"
-              min={1}
-              max={14}
-              value={workRules.max_consecutive_work_days}
+            <Input type="number" min={1} max={14} value={workRules.max_consecutive_work_days}
               onChange={(e) => setWorkRulesField('max_consecutive_work_days', Number(e.target.value))}
-              className="w-16 text-center"
-            />
+              className="w-16 text-center" />
             <span className="text-sm text-gray-500">日</span>
           </div>
-
-          {/* 夜勤後の休息 */}
           <div className="flex items-center gap-3">
             <Label className="w-44 text-sm text-gray-600 shrink-0">夜勤後の休息</Label>
-            <Input
-              type="number"
-              min={0}
-              max={24}
-              value={workRules.min_rest_hours_after_night}
+            <Input type="number" min={0} max={24} value={workRules.min_rest_hours_after_night}
               onChange={(e) => setWorkRulesField('min_rest_hours_after_night', Number(e.target.value))}
-              className="w-16 text-center"
-            />
+              className="w-16 text-center" />
             <span className="text-sm text-gray-500">時間</span>
           </div>
-
-          {/* 夜勤日に「明け」を自動挿入 */}
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2.5 cursor-pointer">
               <Checkbox
@@ -190,18 +194,11 @@ export default function ConstraintsPage() {
               <span className="text-sm text-gray-700">夜勤日に「明け」を自動挿入</span>
             </label>
           </div>
-
-          {/* 月間最大夜勤回数 */}
           <div className="flex items-center gap-3">
             <Label className="w-44 text-sm text-gray-600 shrink-0">月間最大夜勤回数</Label>
-            <Input
-              type="number"
-              min={0}
-              max={20}
-              value={workRules.max_night_shifts_per_month}
+            <Input type="number" min={0} max={20} value={workRules.max_night_shifts_per_month}
               onChange={(e) => setWorkRulesField('max_night_shifts_per_month', Number(e.target.value))}
-              className="w-16 text-center"
-            />
+              className="w-16 text-center" />
             <span className="text-sm text-gray-500">回</span>
           </div>
         </div>
@@ -215,11 +212,9 @@ export default function ConstraintsPage() {
             onClick={() => setPairDialogOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors"
           >
-            <Plus className="h-3.5 w-3.5" />
-            追加
+            <Plus className="h-3.5 w-3.5" />追加
           </button>
         </div>
-
         {pairs.length === 0 ? (
           <p className="text-sm text-gray-400 py-4 text-center">ペア制約が設定されていません</p>
         ) : (
@@ -227,24 +222,16 @@ export default function ConstraintsPage() {
             {pairs.map((pair) => {
               const config = PAIR_TYPE_CONFIG[pair.constraint_type]
               return (
-                <div
-                  key={pair.id}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-lg border ${config.className}`}
-                >
+                <div key={pair.id} className={`flex items-center justify-between px-3 py-2.5 rounded-lg border ${config.className}`}>
                   <div className="flex items-center gap-2 text-sm text-gray-700">
                     {config.icon}
                     <span className="font-medium text-gray-500 text-xs">{config.label}:</span>
                     <span>{staffName(pair.staff_id_a)}</span>
                     <span className="text-gray-400">↔</span>
                     <span>{staffName(pair.staff_id_b)}</span>
-                    {pair.note && (
-                      <span className="text-xs text-gray-400">（{pair.note}）</span>
-                    )}
                   </div>
-                  <button
-                    onClick={() => handleDeletePair(pair.id)}
-                    className="text-gray-400 hover:text-red-400 transition-colors ml-2"
-                  >
+                  <button onClick={() => setPairs((prev) => prev.filter((p) => p.id !== pair.id))}
+                    className="text-gray-400 hover:text-red-400 transition-colors ml-2">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -254,7 +241,6 @@ export default function ConstraintsPage() {
         )}
       </section>
 
-      {/* ペア制約追加ダイアログ */}
       <PairConstraintDialog
         open={pairDialogOpen}
         onClose={() => setPairDialogOpen(false)}

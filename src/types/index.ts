@@ -1,12 +1,22 @@
 // =============================
 // スタッフ
 // =============================
-export type EmploymentType = 'full_time' | 'part_time' | 'dispatch'
+
+/** 資格区分 */
+export type StaffQualification = '正看護師' | '准看護師'
+
+/** 役職 */
+export type StaffRole = '師長' | '主任' | '一般'
+
+/** 勤務時間帯（日勤AM/PM分類に使用） */
+export type WorkHoursType = 'AM' | 'PM'
 
 export interface StaffProfile {
   id: string
   name: string
-  employment_type: EmploymentType
+  qualification: StaffQualification
+  role: StaffRole
+  work_hours_type: WorkHoursType
   max_hours_per_month: number
   max_night_shifts: number
   experience_years: number
@@ -31,11 +41,32 @@ export interface ShiftType {
 }
 
 // =============================
+// お風呂の日
+// =============================
+export type BathDayPattern = 'weekly' | 'date'
+
+export interface BathDay {
+  id: string
+  year: number
+  month: number
+  /** weekly: 曜日指定（0=日〜6=土）, date: 日付指定 */
+  pattern: BathDayPattern
+  day_of_week: number | null  // weekly の場合
+  date: number | null         // date の場合
+  created_at: string
+}
+
+// =============================
 // 勤務制約
 // =============================
 export interface ShiftConstraints {
   id: string
+  /** シフト種別IDごとの最低配置人数 */
   min_staff_per_shift: Record<string, number>
+  /** 土日の最低配置人数 */
+  min_staff_weekend: number
+  /** お風呂の日の最低配置人数 */
+  min_staff_bath_day: number
   max_consecutive_work_days: number
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
@@ -59,9 +90,9 @@ export interface StaffPairConstraint {
 }
 
 // =============================
-// 希望休・有給申請
+// 勤務希望（希望休・シフト希望）
 // =============================
-export type LeaveType = '希望休' | '有給' | '特別休暇' | 'シフト希望'
+export type LeaveType = '希望休' | '有給' | '特別休暇' | 'シフト希望' | '他'
 
 export interface LeaveRequest {
   id: string

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { StaffProfile } from '@/types'
+import { StaffProfile, StaffQualification, StaffRole, WorkHoursType } from '@/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -19,37 +19,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
-
-interface Skill {
-  id: string
-  name: string
-}
 
 interface StaffFormData {
   name: string
-  employment_type: string
+  qualification: StaffQualification
+  role: StaffRole
+  work_hours_type: WorkHoursType
   experience_years: number
   max_hours_per_month: number
   max_night_shifts: number
-  skill_ids: string[]
 }
 
 interface StaffFormDialogProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: StaffFormData) => void
-  initialData?: (Partial<StaffProfile> & { skills?: Skill[] }) | null
-  availableSkills: Skill[]
+  initialData?: Partial<StaffProfile> | null
 }
 
 const defaultForm: StaffFormData = {
   name: '',
-  employment_type: 'full_time',
+  qualification: '正看護師',
+  role: '一般',
+  work_hours_type: 'AM',
   experience_years: 0,
   max_hours_per_month: 160,
   max_night_shifts: 8,
-  skill_ids: [],
 }
 
 export function StaffFormDialog({
@@ -57,7 +52,6 @@ export function StaffFormDialog({
   onClose,
   onSubmit,
   initialData,
-  availableSkills,
 }: StaffFormDialogProps) {
   const [form, setForm] = useState<StaffFormData>(defaultForm)
   const isEdit = !!initialData?.id
@@ -67,26 +61,18 @@ export function StaffFormDialog({
       if (initialData) {
         setForm({
           name: initialData.name ?? '',
-          employment_type: initialData.employment_type ?? 'full_time',
+          qualification: initialData.qualification ?? '正看護師',
+          role: initialData.role ?? '一般',
+          work_hours_type: initialData.work_hours_type ?? 'AM',
           experience_years: initialData.experience_years ?? 0,
           max_hours_per_month: initialData.max_hours_per_month ?? 160,
           max_night_shifts: initialData.max_night_shifts ?? 8,
-          skill_ids: initialData.skills?.map((s) => s.id) ?? [],
         })
       } else {
         setForm(defaultForm)
       }
     }
   }, [open, initialData])
-
-  function toggleSkill(skillId: string) {
-    setForm((prev) => ({
-      ...prev,
-      skill_ids: prev.skill_ids.includes(skillId)
-        ? prev.skill_ids.filter((id) => id !== skillId)
-        : [...prev.skill_ids, skillId],
-    }))
-  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -113,25 +99,53 @@ export function StaffFormDialog({
             />
           </div>
 
-          {/* 雇用形態 */}
+          {/* 資格・役職（2列） */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>資格</Label>
+              <Select
+                value={form.qualification}
+                onValueChange={(v) => v && setForm({ ...form, qualification: v as StaffQualification })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="正看護師">正看護師</SelectItem>
+                  <SelectItem value="准看護師">准看護師</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>役職</Label>
+              <Select
+                value={form.role}
+                onValueChange={(v) => v && setForm({ ...form, role: v as StaffRole })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="師長">師長</SelectItem>
+                  <SelectItem value="主任">主任</SelectItem>
+                  <SelectItem value="一般">一般</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* 勤務時間帯 */}
           <div className="space-y-1.5">
-            <Label>雇用形態</Label>
+            <Label>勤務時間帯</Label>
             <Select
-              value={form.employment_type}
-              onValueChange={(v) => v && setForm({ ...form, employment_type: v })}
+              value={form.work_hours_type}
+              onValueChange={(v) => v && setForm({ ...form, work_hours_type: v as WorkHoursType })}
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="full_time">正社員</SelectItem>
-                <SelectItem value="part_time">パート</SelectItem>
-                <SelectItem value="dispatch">契約社員</SelectItem>
+                <SelectItem value="AM">AM（日勤・早番帯）</SelectItem>
+                <SelectItem value="PM">PM（遅番・夕方帯）</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* 経験年数・月間上限（2列） */}
+          {/* 経験年数・月間最大夜勤回数（2列） */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="exp">経験年数（年）</Label>
@@ -169,27 +183,6 @@ export function StaffFormDialog({
               onChange={(e) => setForm({ ...form, max_hours_per_month: Number(e.target.value) })}
             />
           </div>
-
-          {/* スキル */}
-          {availableSkills.length > 0 && (
-            <div className="space-y-2">
-              <Label>スキル</Label>
-              <div className="flex flex-wrap gap-3">
-                {availableSkills.map((skill) => (
-                  <label
-                    key={skill.id}
-                    className="flex items-center gap-1.5 cursor-pointer text-sm"
-                  >
-                    <Checkbox
-                      checked={form.skill_ids.includes(skill.id)}
-                      onCheckedChange={() => toggleSkill(skill.id)}
-                    />
-                    {skill.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
 
           <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={onClose}>

@@ -25,6 +25,7 @@ const LEAVE_TYPE_CONFIG: Record<LeaveType, { label: string; className: string }>
   有給: { label: '有給', className: 'bg-purple-100 text-purple-700 hover:bg-purple-100' },
   特別休暇: { label: '特別休暇', className: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
   シフト希望: { label: 'シフト希望', className: 'bg-teal-100 text-teal-700 hover:bg-teal-100' },
+  他: { label: 'その他', className: 'bg-pink-100 text-pink-600 hover:bg-pink-100' },
 }
 
 const STATUS_CONFIG: Record<LeaveStatus, { label: string; className: string }> = {
