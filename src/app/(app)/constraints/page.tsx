@@ -13,10 +13,10 @@ import { PairConstraintDialog, PairConstraintFormData } from '@/components/featu
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
 // ------
 const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長',  work_hours_type: 'AM', experience_years: 15, max_hours_per_month: 160, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任',  work_hours_type: 'AM', experience_years: 12, max_hours_per_month: 160, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般',  work_hours_type: 'AM', experience_years: 8,  max_hours_per_month: 160, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '伊藤 健二',  qualification: '准看護師', role: '一般',  work_hours_type: 'PM', experience_years: 4,  max_hours_per_month: 120, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 15, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 12, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 8,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-4', name: '伊藤 健二',  qualification: '准看護師', role: '一般',  work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
 ]
 
 interface MinStaffing {

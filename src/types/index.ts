@@ -8,21 +8,25 @@ export type StaffQualification = '正看護師' | '准看護師'
 /** 役職 */
 export type StaffRole = '師長' | '主任' | '一般'
 
-/** 勤務時間帯（日勤AM/PM分類に使用） */
-export type WorkHoursType = 'AM' | 'PM'
-
 export interface StaffProfile {
   id: string
   name: string
   qualification: StaffQualification
   role: StaffRole
-  work_hours_type: WorkHoursType
-  max_hours_per_month: number
+  /** 勤務開始時刻（例: "08:30"）。日勤AM/PM分類に使用 */
+  work_start_time: string
+  /** 勤務終了時刻（例: "17:30"）*/
+  work_end_time: string
   max_night_shifts: number
   experience_years: number
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+/** work_start_time から AM/PM を導出するユーティリティ */
+export function deriveWorkHoursType(work_start_time: string): 'AM' | 'PM' {
+  return work_start_time < '12:00' ? 'AM' : 'PM'
 }
 
 // =============================

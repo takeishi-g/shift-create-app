@@ -1,6 +1,6 @@
 'use client'
 
-import { StaffProfile } from '@/types'
+import { StaffProfile, deriveWorkHoursType } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -38,16 +38,15 @@ export function StaffTable({ staff, onEdit, onDelete }: StaffTableProps) {
             <TableHead className="w-[160px] text-xs font-semibold text-gray-400 px-4">氏名</TableHead>
             <TableHead className="w-[110px] text-xs font-semibold text-gray-400 px-4">資格</TableHead>
             <TableHead className="w-[90px] text-xs font-semibold text-gray-400 px-4">役職</TableHead>
-            <TableHead className="w-[90px] text-xs font-semibold text-gray-400 px-4">時間帯</TableHead>
+            <TableHead className="w-[140px] text-xs font-semibold text-gray-400 px-4">勤務時間</TableHead>
             <TableHead className="w-[100px] text-xs font-semibold text-gray-400 px-4">夜勤上限</TableHead>
-            <TableHead className="w-[120px] text-xs font-semibold text-gray-400 px-4">月間上限(h)</TableHead>
             <TableHead className="w-[160px] text-xs font-semibold text-gray-400 px-4 text-center">アクション</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {staff.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-sm text-gray-400 py-12">
+              <TableCell colSpan={6} className="text-center text-sm text-gray-400 py-12">
                 スタッフが登録されていません
               </TableCell>
             </TableRow>
@@ -69,9 +68,11 @@ export function StaffTable({ staff, onEdit, onDelete }: StaffTableProps) {
                   <span className="text-gray-400 text-sm">—</span>
                 )}
               </TableCell>
-              <TableCell className="px-4 text-gray-700 text-sm">{s.work_hours_type}</TableCell>
+              <TableCell className="px-4 text-gray-700 text-sm">
+                {s.work_start_time} 〜 {s.work_end_time}
+                <span className="ml-1.5 text-xs text-gray-400">({deriveWorkHoursType(s.work_start_time)})</span>
+              </TableCell>
               <TableCell className="px-4 text-gray-700 text-sm">{s.max_night_shifts}回</TableCell>
-              <TableCell className="px-4 text-gray-700 text-sm">{s.max_hours_per_month}h</TableCell>
               <TableCell className="px-4">
                 <div className="flex items-center justify-center gap-2">
                   <button

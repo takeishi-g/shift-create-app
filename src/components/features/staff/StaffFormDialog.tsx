@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { StaffProfile, StaffQualification, StaffRole, WorkHoursType } from '@/types'
+import { StaffProfile, StaffQualification, StaffRole } from '@/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,9 +24,9 @@ interface StaffFormData {
   name: string
   qualification: StaffQualification
   role: StaffRole
-  work_hours_type: WorkHoursType
+  work_start_time: string
+  work_end_time: string
   experience_years: number
-  max_hours_per_month: number
   max_night_shifts: number
 }
 
@@ -41,10 +41,21 @@ const defaultForm: StaffFormData = {
   name: '',
   qualification: '正看護師',
   role: '一般',
-  work_hours_type: 'AM',
+  work_start_time: '08:30',
+  work_end_time: '17:30',
   experience_years: 0,
-  max_hours_per_month: 160,
   max_night_shifts: 8,
+}
+
+const QUALIFICATION_LABEL: Record<StaffQualification, string> = {
+  正看護師: '正看護師',
+  准看護師: '准看護師',
+}
+
+const ROLE_LABEL: Record<StaffRole, string> = {
+  師長: '師長',
+  主任: '主任',
+  一般: '一般',
 }
 
 export function StaffFormDialog({
@@ -63,9 +74,9 @@ export function StaffFormDialog({
           name: initialData.name ?? '',
           qualification: initialData.qualification ?? '正看護師',
           role: initialData.role ?? '一般',
-          work_hours_type: initialData.work_hours_type ?? 'AM',
+          work_start_time: initialData.work_start_time ?? '08:30',
+          work_end_time: initialData.work_end_time ?? '17:30',
           experience_years: initialData.experience_years ?? 0,
-          max_hours_per_month: initialData.max_hours_per_month ?? 160,
           max_night_shifts: initialData.max_night_shifts ?? 8,
         })
       } else {
@@ -107,7 +118,9 @@ export function StaffFormDialog({
                 value={form.qualification}
                 onValueChange={(v) => v && setForm({ ...form, qualification: v as StaffQualification })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{QUALIFICATION_LABEL[form.qualification]}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="正看護師">正看護師</SelectItem>
                   <SelectItem value="准看護師">准看護師</SelectItem>
@@ -120,7 +133,9 @@ export function StaffFormDialog({
                 value={form.role}
                 onValueChange={(v) => v && setForm({ ...form, role: v as StaffRole })}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue>{ROLE_LABEL[form.role]}</SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="師長">師長</SelectItem>
                   <SelectItem value="主任">主任</SelectItem>
@@ -130,19 +145,27 @@ export function StaffFormDialog({
             </div>
           </div>
 
-          {/* 勤務時間帯 */}
+          {/* 勤務時間（開始〜終了） */}
           <div className="space-y-1.5">
-            <Label>勤務時間帯</Label>
-            <Select
-              value={form.work_hours_type}
-              onValueChange={(v) => v && setForm({ ...form, work_hours_type: v as WorkHoursType })}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="AM">AM（日勤・早番帯）</SelectItem>
-                <SelectItem value="PM">PM（遅番・夕方帯）</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label>勤務時間</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="time"
+                value={form.work_start_time}
+                onChange={(e) => setForm({ ...form, work_start_time: e.target.value })}
+                className="w-32"
+              />
+              <span className="text-sm text-gray-500">〜</span>
+              <Input
+                type="time"
+                value={form.work_end_time}
+                onChange={(e) => setForm({ ...form, work_end_time: e.target.value })}
+                className="w-32"
+              />
+            </div>
+            <p className="text-xs text-gray-400">
+              {form.work_start_time < '12:00' ? 'AM帯（日勤者AM集計）' : 'PM帯（日勤者PM集計）'}
+            </p>
           </div>
 
           {/* 経験年数・月間最大夜勤回数（2列） */}
@@ -169,19 +192,6 @@ export function StaffFormDialog({
                 onChange={(e) => setForm({ ...form, max_night_shifts: Number(e.target.value) })}
               />
             </div>
-          </div>
-
-          {/* 月間最大勤務時間 */}
-          <div className="space-y-1.5">
-            <Label htmlFor="hours">月間最大勤務時間（h）</Label>
-            <Input
-              id="hours"
-              type="number"
-              min={0}
-              max={300}
-              value={form.max_hours_per_month}
-              onChange={(e) => setForm({ ...form, max_hours_per_month: Number(e.target.value) })}
-            />
           </div>
 
           <DialogFooter className="pt-2">

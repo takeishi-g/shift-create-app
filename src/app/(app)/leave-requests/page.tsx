@@ -18,9 +18,9 @@ import {
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
 // ------
 const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '山田 太郎', qualification: '正看護師', role: '師長', work_hours_type: 'AM', experience_years: 5,  max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '鈴木 花子', qualification: '正看護師', role: '一般', work_hours_type: 'AM', experience_years: 2,  max_hours_per_month: 100, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '田中 一郎', qualification: '准看護師', role: '一般', work_hours_type: 'PM', experience_years: 8,  max_hours_per_month: 160, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-1', name: '山田 太郎', qualification: '正看護師', role: '師長', work_start_time: '08:30', work_end_time: '17:30', experience_years: 5,  max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-2', name: '鈴木 花子', qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 2,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+  { id: 'st-3', name: '田中 一郎', qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 8,  max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
 ]
 
 const MOCK_SHIFT_TYPES: ShiftType[] = [
