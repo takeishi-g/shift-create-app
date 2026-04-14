@@ -193,7 +193,7 @@ export default function ShiftTablePage() {
           <thead>
             {/* お風呂の日ヘッダー */}
             <tr>
-              <th className="sticky left-0 z-20 bg-white border-b border-rose-100 px-2 py-1 text-left text-[10px] text-gray-400 font-normal min-w-[120px]">
+              <th className="sticky left-0 z-20 bg-white border-b border-rose-100 px-2 py-1 text-left text-[10px] text-gray-400 font-normal w-[120px] min-w-[120px] max-w-[120px]">
                 氏名/曜日
               </th>
               {days.map(({ day, dow, isBath }) => (
