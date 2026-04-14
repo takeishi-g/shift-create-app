@@ -30,7 +30,6 @@ interface WorkRules {
   max_consecutive_work_days: number
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
-  max_night_shifts_per_month: number
   min_staff_weekend: number
   min_staff_bath_day: number
 }
@@ -46,7 +45,6 @@ const INITIAL_WORK_RULES: WorkRules = {
   max_consecutive_work_days: 5,
   min_rest_hours_after_night: 11,
   auto_insert_off_after_night: true,
-  max_night_shifts_per_month: 4,
   min_staff_weekend: 3,
   min_staff_bath_day: 4,
 }
@@ -193,13 +191,6 @@ export default function ConstraintsPage() {
               />
               <span className="text-sm text-gray-700">夜勤日に「明け」を自動挿入</span>
             </label>
-          </div>
-          <div className="flex items-center gap-3">
-            <Label className="w-44 text-sm text-gray-600 shrink-0">月間最大夜勤回数</Label>
-            <Input type="number" min={0} max={20} value={workRules.max_night_shifts_per_month}
-              onChange={(e) => setWorkRulesField('max_night_shifts_per_month', Number(e.target.value))}
-              className="w-16 text-center" />
-            <span className="text-sm text-gray-500">回</span>
           </div>
         </div>
       </section>
