@@ -188,7 +188,7 @@ export default function ShiftTablePage() {
       </div>
 
       {/* テーブル本体 */}
-      <div className="flex-1 overflow-auto rounded-xl border border-rose-100 bg-white">
+      <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-rose-100 bg-white">
         <table className="border-collapse text-xs" style={{ minWidth: 'max-content' }}>
           <thead>
             {/* お風呂の日ヘッダー */}

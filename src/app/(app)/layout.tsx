@@ -9,9 +9,9 @@ export default function AppLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <TopBar />
-        <main className="flex-1 overflow-hidden flex flex-col min-h-0">{children}</main>
+        <main className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</main>
       </div>
     </div>
   )
