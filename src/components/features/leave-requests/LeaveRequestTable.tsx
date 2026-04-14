@@ -14,7 +14,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ja } from 'date-fns/locale'
 
-export type LeaveStatus = 'pending' | 'approved' | 'rejected'
+export type LeaveStatus = '申請中' | '承認済み' | '却下'
 
 export interface LeaveRequestWithStatus extends LeaveRequest {
   status: LeaveStatus
@@ -29,9 +29,9 @@ const LEAVE_TYPE_CONFIG: Record<LeaveType, { label: string; className: string }>
 }
 
 const STATUS_CONFIG: Record<LeaveStatus, { label: string; className: string }> = {
-  pending: { label: '申請中', className: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-100' },
-  approved: { label: '承認済み', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
-  rejected: { label: '却下', className: 'bg-red-100 text-red-600 hover:bg-red-100' },
+  申請中: { label: '申請中', className: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-100' },
+  承認済み: { label: '承認済み', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
+  却下: { label: '却下', className: 'bg-red-100 text-red-600 hover:bg-red-100' },
 }
 
 interface LeaveRequestTableProps {

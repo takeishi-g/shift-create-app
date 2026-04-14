@@ -44,7 +44,7 @@ const defaultForm: LeaveFormData = {
   date: '',
   type: '希望休',
   preferred_shift_type_id: null,
-  status: 'pending',
+  status: '申請中',
   note: '',
 }
 
@@ -174,14 +174,12 @@ export function LeaveRequestFormDialog({
               onValueChange={(v) => v && setForm({ ...form, status: v as LeaveStatus })}
             >
               <SelectTrigger>
-                <SelectValue>
-                  {(value: string | null) => ({ pending: '申請中', approved: '承認済み', rejected: '却下' }[value ?? ''] ?? '申請中')}
-                </SelectValue>
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="pending">申請中</SelectItem>
-                <SelectItem value="approved">承認済み</SelectItem>
-                <SelectItem value="rejected">却下</SelectItem>
+                <SelectItem value="申請中">申請中</SelectItem>
+                <SelectItem value="承認済み">承認済み</SelectItem>
+                <SelectItem value="却下">却下</SelectItem>
               </SelectContent>
             </Select>
           </div>

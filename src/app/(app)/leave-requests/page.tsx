@@ -32,19 +32,19 @@ const MOCK_SHIFT_TYPES: ShiftType[] = [
 const MOCK_REQUESTS: LeaveRequestWithStatus[] = [
   {
     id: 'lr-1', staff_id: 'st-1', date: '2025-04-15', type: '希望休',
-    preferred_shift_type_id: null, note: null, status: 'approved',
+    preferred_shift_type_id: null, note: null, status: '承認済み',
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[0],
   },
   {
     id: 'lr-2', staff_id: 'st-2', date: '2025-04-20', type: '有給',
-    preferred_shift_type_id: null, note: '私用のため', status: 'pending',
+    preferred_shift_type_id: null, note: '私用のため', status: '申請中',
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[1],
   },
   {
     id: 'lr-3', staff_id: 'st-3', date: '2025-04-23', type: 'シフト希望',
-    preferred_shift_type_id: 'sh-3', note: null, status: 'approved',
+    preferred_shift_type_id: 'sh-3', note: null, status: '承認済み',
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[2],
     preferred_shift_type: MOCK_SHIFT_TYPES[2],
@@ -61,7 +61,7 @@ let nextId = 100
 export default function LeaveRequestsPage() {
   const [requests, setRequests] = useState<LeaveRequestWithStatus[]>(MOCK_REQUESTS)
   const [selectedMonth, setSelectedMonth] = useState('2025-04')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | '申請中' | '承認済み' | '却下'>('all')
   const [formOpen, setFormOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<LeaveRequestWithStatus | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<LeaveRequestWithStatus | null>(null)
@@ -161,9 +161,9 @@ export default function LeaveRequestsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">ステータス: 全て</SelectItem>
-            <SelectItem value="pending">申請中</SelectItem>
-            <SelectItem value="approved">承認済み</SelectItem>
-            <SelectItem value="rejected">却下</SelectItem>
+            <SelectItem value="申請中">申請中</SelectItem>
+            <SelectItem value="承認済み">承認済み</SelectItem>
+            <SelectItem value="却下">却下</SelectItem>
           </SelectContent>
         </Select>
       </div>
