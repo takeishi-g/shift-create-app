@@ -11,7 +11,7 @@ export default function AppLayout({
       <Sidebar />
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <TopBar />
-        <main className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</main>
+        <main className="flex-1 overflow-hidden" style={{ contain: 'strict' }}>{children}</main>
       </div>
     </div>
   )
