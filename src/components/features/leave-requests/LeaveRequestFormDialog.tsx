@@ -102,9 +102,9 @@ export function LeaveRequestFormDialog({
               onValueChange={(v) => v && setForm({ ...form, staff_id: v })}
             >
               <SelectTrigger>
-                <span className={form.staff_id ? '' : 'text-gray-400'}>
-                  {form.staff_id ? (staffList.find((s) => s.id === form.staff_id)?.name ?? form.staff_id) : 'スタッフを選択'}
-                </span>
+                <SelectValue placeholder="スタッフを選択">
+                  {(value: string | null) => value ? (staffList.find((s) => s.id === value)?.name ?? value) : 'スタッフを選択'}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {staffList.map((s) => (
@@ -174,7 +174,9 @@ export function LeaveRequestFormDialog({
               onValueChange={(v) => v && setForm({ ...form, status: v as LeaveStatus })}
             >
               <SelectTrigger>
-                <span>{{ pending: '申請中', approved: '承認済み', rejected: '却下' }[form.status]}</span>
+                <SelectValue>
+                  {(value: string | null) => ({ pending: '申請中', approved: '承認済み', rejected: '却下' }[value ?? ''] ?? '申請中')}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pending">申請中</SelectItem>
