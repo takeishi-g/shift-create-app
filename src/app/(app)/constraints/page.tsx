@@ -110,7 +110,7 @@ export default function ConstraintsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="h-full overflow-y-auto p-6 space-y-6">
       {/* ページヘッダー */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">勤務制約設定</h1>
