@@ -1,7 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { Users, FileText, BarChart3, ChevronRight, Calendar, UserPlus, Sparkles, ClipboardList } from 'lucide-react'
+import { addDays, format, getDay } from 'date-fns'
+import { ja } from 'date-fns/locale'
+import { Users, FileText, ChevronRight, Calendar, UserPlus, Sparkles, ClipboardList } from 'lucide-react'
 
 // ------
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
@@ -20,6 +22,14 @@ interface NoteItem {
   note: string
 }
 
+interface DayShift {
+  label: string   // 例: "4/15（火）"
+  早: number
+  日: number
+  遅: number
+  夜: number
+}
+
 const MOCK_ACTIVITIES: ActivityItem[] = [
   { id: '1', message: '山田 太郎さんの希望休を登録しました', date: '4/15', color: 'rose' },
   { id: '2', message: '2025年4月のシフトが自動生成されました', date: '4/13', color: 'green' },
@@ -32,6 +42,22 @@ const MOCK_NOTES: NoteItem[] = [
   { name: '鈴木 花子', date: '4月20日（日）', note: '私用のため緊急不可' },
   { name: '田中 一郎', date: '4月23日（水）', note: '—' },
 ]
+
+// 直近3日モックシフト（Supabase接続後は実データに差し替え）
+const MOCK_DAY_SHIFTS: { 早: number; 日: number; 遅: number; 夜: number }[] = [
+  { 早: 1, 日: 2, 遅: 1, 夜: 1 },
+  { 早: 2, 日: 1, 遅: 1, 夜: 1 },
+  { 早: 1, 日: 3, 遅: 0, 夜: 1 },
+]
+
+const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
+
+const SHIFT_BADGE: Record<string, string> = {
+  早: 'bg-sky-100 text-sky-700',
+  日: 'text-gray-600',
+  遅: 'bg-orange-100 text-orange-700',
+  夜: 'bg-violet-100 text-violet-700',
+}
 
 const ACTIVITY_DOT: Record<ActivityItem['color'], string> = {
   rose:  'bg-rose-400',
@@ -62,10 +88,20 @@ const QUICK_ACTIONS = [
 ]
 
 export default function DashboardPage() {
+  const today = new Date(2025, 3, 15) // TODO: Supabase接続後は実際の日付に
+  const dayShifts: DayShift[] = MOCK_DAY_SHIFTS.map((s, i) => {
+    const d = addDays(today, i)
+    const dow = getDay(d)
+    return {
+      label: `${format(d, 'M/d')}（${DAY_LABELS[dow]}）`,
+      ...s,
+    }
+  })
+
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
-      {/* KPI カード */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* KPI カード（2枚） */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* 今月のスタッフ数 */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 shrink-0">
@@ -89,19 +125,34 @@ export default function DashboardPage() {
             <p className="text-xs text-gray-400 mt-0.5">先月比 +1件</p>
           </div>
         </div>
+      </div>
 
-        {/* シフト充足率 */}
-        <div className="rounded-xl border border-rose-100 bg-white p-5 flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 shrink-0">
-            <BarChart3 className="h-6 w-6 text-rose-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-400">シフト充足率</p>
-            <p className="text-3xl font-bold text-gray-900 leading-tight">80<span className="text-base font-normal text-gray-500 ml-0.5">%</span></p>
-            <div className="mt-1.5 h-1.5 w-full rounded-full bg-gray-100">
-              <div className="h-1.5 rounded-full bg-emerald-400" style={{ width: '80%' }} />
+      {/* 直近3日のシフト */}
+      <div className="rounded-xl border border-rose-100 bg-white p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">直近3日のシフト</h2>
+          <Link href="/shift-table" className="text-xs text-rose-500 hover:text-rose-600 font-medium">
+            シフト表を見る →
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {dayShifts.map((day, i) => (
+            <div key={i} className={`rounded-lg border p-3 space-y-2 ${i === 0 ? 'border-rose-200 bg-rose-50/40' : 'border-gray-100 bg-gray-50/40'}`}>
+              <p className={`text-xs font-semibold ${i === 0 ? 'text-rose-600' : 'text-gray-500'}`}>
+                {i === 0 ? '今日 ' : ''}{day.label}
+              </p>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                {(['早', '日', '遅', '夜'] as const).map((shift) => (
+                  <div key={shift} className="flex items-center gap-1">
+                    <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${SHIFT_BADGE[shift]}`}>
+                      {shift}
+                    </span>
+                    <span className="text-xs text-gray-600">{day[shift]}人</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       </div>
 
