@@ -30,11 +30,11 @@ interface ShiftDef {
 
 const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
   早: { code: '早', label: '早番',   bg: 'bg-sky-200',     text: 'text-sky-800',    ampm: 'AM' },
-  日: { code: '日', label: '日勤',   bg: 'bg-emerald-200', text: 'text-emerald-800', ampm: null }, // work_hours_typeで分類
+  日: { code: '日', label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null }, // work_hours_typeで分類
   遅: { code: '遅', label: '遅番',   bg: 'bg-orange-200',  text: 'text-orange-800', ampm: 'PM' },
   夜: { code: '夜', label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
-  明: { code: '明', label: '明け',   bg: 'bg-rose-100',    text: 'text-rose-500',   ampm: 'off' },
-  公: { code: '公', label: '公休',   bg: 'bg-gray-100',    text: 'text-gray-500',   ampm: 'off' },
+  明: { code: '明', label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
+  公: { code: '公', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
   有: { code: '有', label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
   他: { code: '他', label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
 }
