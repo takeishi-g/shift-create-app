@@ -161,7 +161,7 @@ export default function ShiftTablePage() {
   }, [days, rows])
 
   return (
-    <div className="absolute inset-0 flex flex-col gap-3 p-4 overflow-hidden">
+    <div className="space-y-4 p-4">
       {/* ヘッダー */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -188,7 +188,7 @@ export default function ShiftTablePage() {
       </div>
 
       {/* テーブル本体 */}
-      <div className="flex-1 overflow-auto rounded-xl border border-rose-100 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
         <table className="border-collapse text-xs" style={{ minWidth: 'max-content' }}>
           <thead>
             {/* お風呂の日ヘッダー */}
