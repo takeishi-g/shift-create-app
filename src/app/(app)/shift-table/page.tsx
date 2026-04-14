@@ -161,7 +161,7 @@ export default function ShiftTablePage() {
   }, [days, rows])
 
   return (
-    <div className="flex flex-col gap-3 p-4 overflow-hidden" style={{ height: 'calc(100dvh - 56px)' }}>
+    <div className="absolute inset-0 flex flex-col gap-3 p-4 overflow-hidden">
       {/* ヘッダー */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
