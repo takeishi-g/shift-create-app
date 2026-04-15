@@ -19,10 +19,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
+export type PairShiftType = '日勤' | '夜勤' | 'all'
+
 export interface PairConstraintFormData {
   staff_id_a: string
   staff_id_b: string
   constraint_type: PairConstraintType
+  shift_type: PairShiftType
 }
 
 interface PairConstraintDialogProps {
@@ -36,6 +39,7 @@ const defaultForm: PairConstraintFormData = {
   staff_id_a: '',
   staff_id_b: '',
   constraint_type: 'must_pair',
+  shift_type: 'all',
 }
 
 export function PairConstraintDialog({
@@ -78,6 +82,24 @@ export function PairConstraintDialog({
               <SelectContent>
                 <SelectItem value="must_pair">必ペア（同じシフトに入れる）</SelectItem>
                 <SelectItem value="must_not_pair">ペア禁止（同じシフトに入れない）</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* 対象シフト */}
+          <div className="space-y-1.5">
+            <Label>対象シフト</Label>
+            <Select
+              value={form.shift_type}
+              onValueChange={(v) => v && setForm({ ...form, shift_type: v as PairShiftType })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">すべて</SelectItem>
+                <SelectItem value="日勤">日勤</SelectItem>
+                <SelectItem value="夜勤">夜勤</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -9,6 +9,12 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { StaffProfile, StaffPairConstraint, PairConstraintType } from '@/types'
 import { PairConstraintDialog, PairConstraintFormData } from '@/components/features/constraints/PairConstraintDialog'
 
+const SHIFT_TYPE_LABEL: Record<string, string> = {
+  all:  'すべて',
+  日勤: '日勤',
+  夜勤: '夜勤',
+}
+
 // ------
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
 // ------
@@ -50,8 +56,8 @@ const INITIAL_WORK_RULES: WorkRules = {
 }
 
 const INITIAL_PAIRS: StaffPairConstraint[] = [
-  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair',     shift_type_id: null, note: null, created_at: '' },
-  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: null, note: null, created_at: '' },
+  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair',     shift_type_id: '日勤', note: null, created_at: '' },
+  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: '夜勤', note: null, created_at: '' },
 ]
 
 let nextPairId = 100
@@ -103,7 +109,7 @@ export default function ConstraintsPage() {
       staff_id_a: data.staff_id_a,
       staff_id_b: data.staff_id_b,
       constraint_type: data.constraint_type,
-      shift_type_id: null,
+      shift_type_id: data.shift_type === 'all' ? null : data.shift_type,
       note: null,
       created_at: new Date().toISOString(),
     }
@@ -255,6 +261,9 @@ export default function ConstraintsPage() {
                     <span>{staffName(pair.staff_id_a)}</span>
                     <span className="text-gray-400">↔</span>
                     <span>{staffName(pair.staff_id_b)}</span>
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500">
+                      {SHIFT_TYPE_LABEL[pair.shift_type_id ?? 'all']}
+                    </span>
                   </div>
                   <button onClick={() => setPairs((prev) => prev.filter((p) => p.id !== pair.id))}
                     className="text-gray-400 hover:text-red-400 transition-colors ml-2">
