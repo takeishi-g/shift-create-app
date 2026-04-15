@@ -2,8 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { getDaysInMonth, getDay } from 'date-fns'
-import { ja } from 'date-fns/locale'
-import { format, parseISO } from 'date-fns'
+import HolidayJP from '@holiday-jp/holiday_jp'
 import {
   Select,
   SelectContent,
@@ -83,20 +82,20 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => {
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
-function headerBg(dow: number) {
-  if (dow === 0) return 'bg-red-50'
+function headerBg(dow: number, isHoliday: boolean) {
+  if (dow === 0 || isHoliday) return 'bg-red-50'
   if (dow === 6) return 'bg-blue-50'
   return 'bg-rose-50'
 }
 
-function cellBg(dow: number) {
-  if (dow === 0) return 'bg-red-50/60'
+function cellBg(dow: number, isHoliday: boolean) {
+  if (dow === 0 || isHoliday) return 'bg-red-50/60'
   if (dow === 6) return 'bg-blue-50/60'
   return ''
 }
 
-function dayTextColor(dow: number) {
-  if (dow === 0) return 'text-red-500'
+function dayTextColor(dow: number, isHoliday: boolean) {
+  if (dow === 0 || isHoliday) return 'text-red-500'
   if (dow === 6) return 'text-blue-500'
   return 'text-gray-700'
 }
@@ -119,11 +118,16 @@ export default function ShiftTablePage() {
   const { days, rows } = useMemo(() => {
     const [year, month] = selectedMonth.split('-').map(Number)
     const daysInMonth = getDaysInMonth(new Date(year, month - 1))
-    const days = Array.from({ length: daysInMonth }, (_, i) => ({
-      day: i + 1,
-      dow: getDay(new Date(year, month - 1, i + 1)),
-      isBath: BATH_DAYS_DOW.includes(getDay(new Date(year, month - 1, i + 1))),
-    }))
+    const days = Array.from({ length: daysInMonth }, (_, i) => {
+      const date = new Date(year, month - 1, i + 1)
+      const dow = getDay(date)
+      return {
+        day: i + 1,
+        dow,
+        isBath: BATH_DAYS_DOW.includes(dow),
+        isHoliday: HolidayJP.isHoliday(date),
+      }
+    })
     const rows: StaffRow[] = MOCK_STAFF.map((staff, idx) => {
       const shifts = makeMockShifts(daysInMonth, idx)
       return {
@@ -196,10 +200,10 @@ export default function ShiftTablePage() {
               <th className="sticky left-0 z-20 bg-white border-b border-rose-100 px-2 py-1 text-left text-[10px] text-gray-400 font-normal w-[120px] min-w-[120px] max-w-[120px]">
                 氏名/曜日
               </th>
-              {days.map(({ day, dow, isBath }) => (
+              {days.map(({ day, dow, isBath, isHoliday }) => (
                 <th
                   key={day}
-                  className={`px-0 py-1 text-center border-b border-rose-100 w-7 min-w-[28px] ${headerBg(dow)}`}
+                  className={`px-0 py-1 text-center border-b border-rose-100 w-7 min-w-[28px] ${headerBg(dow, isHoliday)}`}
                 >
                   <div className={`text-[10px] font-bold ${isBath ? 'text-cyan-600' : 'text-transparent'}`}>
                     {isBath ? '風' : '　'}
@@ -214,13 +218,15 @@ export default function ShiftTablePage() {
             {/* 日付・曜日ヘッダー */}
             <tr>
               <th className="sticky left-0 z-20 bg-rose-50 border-b border-rose-100 px-2 py-1" />
-              {days.map(({ day, dow }) => (
+              {days.map(({ day, dow, isHoliday }) => (
                 <th
                   key={day}
-                  className={`px-0 py-1 text-center border-b border-rose-100 ${headerBg(dow)}`}
+                  className={`px-0 py-1 text-center border-b border-rose-100 ${headerBg(dow, isHoliday)}`}
                 >
-                  <div className={`font-bold text-[11px] ${dayTextColor(dow)}`}>{day}</div>
-                  <div className={`text-[9px] ${dayTextColor(dow)}`}>{DAY_LABELS[dow]}</div>
+                  <div className={`font-bold text-[11px] ${dayTextColor(dow, isHoliday)}`}>{day}</div>
+                  <div className={`text-[9px] ${dayTextColor(dow, isHoliday)}`}>
+                    {isHoliday ? '祝' : DAY_LABELS[dow]}
+                  </div>
                 </th>
               ))}
               <th className="border-b border-l border-rose-100 bg-rose-50" />
@@ -239,13 +245,13 @@ export default function ShiftTablePage() {
                   </span>
                 </td>
                 {/* シフトセル */}
-                {days.map(({ day, dow }, i) => {
+                {days.map(({ day, dow, isHoliday }, i) => {
                   const code = shifts[i] ?? ''
                   const def = code ? SHIFT_DEF[code] : null
                   return (
                     <td
                       key={day}
-                      className={`text-center py-1 px-0 border-b border-gray-100 ${cellBg(dow)}`}
+                      className={`text-center py-1 px-0 border-b border-gray-100 ${cellBg(dow, isHoliday)}`}
                     >
                       {def ? (
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${def.bg} ${def.text}`}>
@@ -270,7 +276,7 @@ export default function ShiftTablePage() {
                 日勤者 AM
               </td>
               {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 border-t-2 border-t-emerald-300 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow)}`}>
+                <td key={i} className={`text-center py-1 border-t-2 border-t-emerald-300 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
                   {c.am || ''}
                 </td>
               ))}
@@ -282,7 +288,7 @@ export default function ShiftTablePage() {
                 日勤者 PM
               </td>
               {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow)}`}>
+                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
                   {c.pm || ''}
                 </td>
               ))}
@@ -294,7 +300,7 @@ export default function ShiftTablePage() {
                 夜勤者
               </td>
               {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow)}`}>
+                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
                   {c.night || ''}
                 </td>
               ))}
@@ -306,7 +312,7 @@ export default function ShiftTablePage() {
                 非勤務者
               </td>
               {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 font-medium text-gray-500 ${cellBg(days[i].dow)}`}>
+                <td key={i} className={`text-center py-1 font-medium text-gray-500 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
                   {c.off || ''}
                 </td>
               ))}
