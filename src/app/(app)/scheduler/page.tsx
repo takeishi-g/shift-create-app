@@ -102,13 +102,25 @@ interface EditCell {
   y: number
 }
 
+const BATH_DAYS_KEY = 'shift-bath-days-dow'
+const DEFAULT_BATH_DAYS_DOW = [1, 4]
+
 export default function ShiftEditPage() {
   const [selectedMonth, setSelectedMonth] = useState('2025-04')
+  const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [shiftGrid, setShiftGrid] = useState<Record<string, ShiftCode[]>>({})
   const [bathSet, setBathSet] = useState<Set<number>>(new Set())
   const [editCell, setEditCell] = useState<EditCell | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
+
+  // 勤務制約設定で保存されたお風呂の曜日を読み込む
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(BATH_DAYS_KEY)
+      if (stored) setBathDaysDow(JSON.parse(stored))
+    } catch {}
+  }, [])
 
   // 日付リスト
   const days = useMemo(() => {
@@ -128,12 +140,12 @@ export default function ShiftEditPage() {
     })
     setShiftGrid(newGrid)
     setBathSet(new Set(days.reduce<number[]>((acc, { dow }, i) => {
-      if (dow === 1 || dow === 4) acc.push(i)
+      if (bathDaysDow.includes(dow)) acc.push(i)
       return acc
     }, [])))
     setEditCell(null)
     setConfirmed(false)
-  }, [days])
+  }, [days, bathDaysDow])
 
   // ポップオーバーの外クリックで閉じる
   useEffect(() => {

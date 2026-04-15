@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { getDaysInMonth, getDay } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
 import {
@@ -54,8 +54,8 @@ const MOCK_STAFF: StaffProfile[] = [
   { id: 'st-5', name: '伊藤 健二',  qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
 ]
 
-// お風呂の日（モック: 毎週月・木）
-const BATH_DAYS_DOW = [1, 4] // 月=1, 木=4
+const BATH_DAYS_KEY = 'shift-bath-days-dow'
+const DEFAULT_BATH_DAYS_DOW = [1, 4] // 月=1, 木=4
 
 function makeMockShifts(daysInMonth: number, seed: number): ShiftCode[] {
   const patterns: ShiftCode[][] = [
@@ -114,6 +114,15 @@ function qualBadgeClass(s: StaffProfile) {
 
 export default function ShiftTablePage() {
   const [selectedMonth, setSelectedMonth] = useState('2025-04')
+  const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
+
+  // 勤務制約設定で保存されたお風呂の曜日を読み込む
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(BATH_DAYS_KEY)
+      if (stored) setBathDaysDow(JSON.parse(stored))
+    } catch {}
+  }, [])
 
   const { days, rows } = useMemo(() => {
     const [year, month] = selectedMonth.split('-').map(Number)
@@ -124,7 +133,7 @@ export default function ShiftTablePage() {
       return {
         day: i + 1,
         dow,
-        isBath: BATH_DAYS_DOW.includes(dow),
+        isBath: bathDaysDow.includes(dow),
         isHoliday: HolidayJP.isHoliday(date),
       }
     })
@@ -139,7 +148,7 @@ export default function ShiftTablePage() {
       }
     })
     return { days, rows }
-  }, [selectedMonth])
+  }, [selectedMonth, bathDaysDow])
 
   // 日ごとの集計
   const dailyCounts = useMemo(() => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, X, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -73,6 +73,8 @@ const PAIR_TYPE_CONFIG: Record<PairConstraintType, { label: string; icon: React.
   },
 }
 
+const BATH_DAYS_KEY = 'shift-bath-days-dow'
+
 export default function ConstraintsPage() {
   const [minStaffing, setMinStaffing] = useState<MinStaffing>(INITIAL_MIN_STAFFING)
   const [workRules, setWorkRules] = useState<WorkRules>(INITIAL_WORK_RULES)
@@ -81,7 +83,16 @@ export default function ConstraintsPage() {
   const [pairDialogOpen, setPairDialogOpen] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // localStorage から初期値を読み込み
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(BATH_DAYS_KEY)
+      if (stored) setBathDays(JSON.parse(stored))
+    } catch {}
+  }, [])
+
   function handleSave() {
+    localStorage.setItem(BATH_DAYS_KEY, JSON.stringify(bathDays))
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
