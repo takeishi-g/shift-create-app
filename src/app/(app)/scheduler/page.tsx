@@ -47,15 +47,8 @@ const MOCK_STAFF: StaffProfile[] = [
   { id: 'st-5', name: '伊藤 健二',  qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
 ]
 
-function makeMockShifts(daysInMonth: number, seed: number): ShiftCode[] {
-  const patterns: ShiftCode[][] = [
-    ['日','日','公','日','日','夜','明','公','日','日','公','日','夜','明','公','日','日','公','公','日','夜','明','公','日','日','公','日','日','公','公','日'],
-    ['早','公','日','早','公','早','夜','明','公','早','早','公','早','公','早','早','公','日','夜','明','公','早','公','早','早','公','早','早','公','早','公'],
-    ['夜','明','公','夜','明','公','日','夜','明','公','日','夜','明','公','日','夜','明','公','日','夜','明','公','日','公','遅','遅','公','日','日','公','遅'],
-    ['公','遅','遅','公','遅','遅','公','遅','公','遅','遅','公','遅','遅','公','公','遅','遅','公','遅','遅','公','遅','公','遅','公','遅','遅','公','遅','遅'],
-    ['日','日','日','公','日','日','公','公','早','早','日','日','公','日','日','公','日','早','早','公','日','日','公','早','早','公','日','日','公','日','有'],
-  ]
-  return patterns[seed % patterns.length].slice(0, daysInMonth)
+function makeDefaultShifts(daysInMonth: number): ShiftCode[] {
+  return Array(daysInMonth).fill('日')
 }
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => {
@@ -136,7 +129,7 @@ export default function ShiftEditPage() {
   useEffect(() => {
     const newGrid: Record<string, ShiftCode[]> = {}
     MOCK_STAFF.forEach((s, idx) => {
-      newGrid[s.id] = makeMockShifts(days.length, idx)
+      newGrid[s.id] = makeDefaultShifts(days.length)
     })
     setShiftGrid(newGrid)
     setBathSet(new Set(days.reduce<number[]>((acc, { dow }, i) => {
