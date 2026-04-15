@@ -76,6 +76,7 @@ const PAIR_TYPE_CONFIG: Record<PairConstraintType, { label: string; icon: React.
 export default function ConstraintsPage() {
   const [minStaffing, setMinStaffing] = useState<MinStaffing>(INITIAL_MIN_STAFFING)
   const [workRules, setWorkRules] = useState<WorkRules>(INITIAL_WORK_RULES)
+  const [bathDays, setBathDays] = useState<number[]>([1, 4]) // 0=日〜6=土、初期値: 月・木
   const [pairs, setPairs] = useState<StaffPairConstraint[]>(INITIAL_PAIRS)
   const [pairDialogOpen, setPairDialogOpen] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -141,26 +142,49 @@ export default function ConstraintsPage() {
         </div>
 
         {/* 土日・お風呂の日 */}
-        <div className="border-t border-gray-100 pt-4 grid grid-cols-2 gap-x-8 gap-y-4">
-          <div className="flex items-center gap-2">
-            <Label className="w-24 text-sm text-gray-600 shrink-0">土日最低人数</Label>
-            <Input
-              type="number" min={0} max={20}
-              value={workRules.min_staff_weekend}
-              onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
-              className="w-16 text-center"
-            />
-            <span className="text-sm text-gray-500">人</span>
+        <div className="border-t border-gray-100 pt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+            <div className="flex items-center gap-2">
+              <Label className="w-24 text-sm text-gray-600 shrink-0">土日最低人数</Label>
+              <Input
+                type="number" min={0} max={20}
+                value={workRules.min_staff_weekend}
+                onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-sm text-gray-500">人</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の日人数</Label>
+              <Input
+                type="number" min={0} max={20}
+                value={workRules.min_staff_bath_day}
+                onChange={(e) => setWorkRulesField('min_staff_bath_day', Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-sm text-gray-500">人</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の日人数</Label>
-            <Input
-              type="number" min={0} max={20}
-              value={workRules.min_staff_bath_day}
-              onChange={(e) => setWorkRulesField('min_staff_bath_day', Number(e.target.value))}
-              className="w-16 text-center"
-            />
-            <span className="text-sm text-gray-500">人</span>
+          {/* お風呂の曜日 */}
+          <div className="flex items-center gap-4">
+            <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の曜日</Label>
+            <div className="flex gap-2">
+              {['日', '月', '火', '水', '木', '金', '土'].map((label, dow) => (
+                <label key={dow} className="flex flex-col items-center gap-1 cursor-pointer">
+                  <span className={`text-xs font-medium ${dow === 0 ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-gray-500'}`}>
+                    {label}
+                  </span>
+                  <Checkbox
+                    checked={bathDays.includes(dow)}
+                    onCheckedChange={(checked) =>
+                      setBathDays((prev) =>
+                        checked ? [...prev, dow].sort() : prev.filter((d) => d !== dow)
+                      )
+                    }
+                  />
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       </section>
