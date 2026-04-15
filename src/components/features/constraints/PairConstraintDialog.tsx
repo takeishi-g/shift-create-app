@@ -123,7 +123,9 @@ export function PairConstraintDialog({
               onValueChange={(v) => v && setForm({ ...form, staff_id_a: v })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="選択してください" />
+                <span className={form.staff_id_a ? '' : 'text-gray-400'}>
+                  {staffList.find(s => s.id === form.staff_id_a)?.name ?? '選択してください'}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {staffList.map((s) => (
@@ -141,7 +143,9 @@ export function PairConstraintDialog({
               onValueChange={(v) => v && setForm({ ...form, staff_id_b: v })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="選択してください" />
+                <span className={form.staff_id_b ? '' : 'text-gray-400'}>
+                  {staffList.find(s => s.id === form.staff_id_b)?.name ?? '選択してください'}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {staffList
