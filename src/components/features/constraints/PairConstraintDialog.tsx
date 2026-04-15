@@ -21,6 +21,17 @@ import {
 
 export type PairShiftType = '日勤' | '夜勤' | 'all'
 
+const CONSTRAINT_TYPE_LABEL: Record<string, string> = {
+  must_pair:     '必ペア（同じシフトに入れる）',
+  must_not_pair: 'ペア禁止（同じシフトに入れない）',
+}
+
+const SHIFT_TYPE_LABEL: Record<string, string> = {
+  all:  'すべて',
+  日勤: '日勤',
+  夜勤: '夜勤',
+}
+
 export interface PairConstraintFormData {
   staff_id_a: string
   staff_id_b: string
@@ -77,7 +88,7 @@ export function PairConstraintDialog({
               onValueChange={(v) => v && setForm({ ...form, constraint_type: v as PairConstraintType })}
             >
               <SelectTrigger>
-                <SelectValue />
+                <span>{CONSTRAINT_TYPE_LABEL[form.constraint_type]}</span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="must_pair">必ペア（同じシフトに入れる）</SelectItem>
@@ -94,7 +105,7 @@ export function PairConstraintDialog({
               onValueChange={(v) => v && setForm({ ...form, shift_type: v as PairShiftType })}
             >
               <SelectTrigger>
-                <SelectValue />
+                <span>{SHIFT_TYPE_LABEL[form.shift_type]}</span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">すべて</SelectItem>
