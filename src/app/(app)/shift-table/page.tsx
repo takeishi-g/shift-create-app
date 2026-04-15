@@ -185,9 +185,6 @@ export default function ShiftTablePage() {
           <button className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
             PDF出力
           </button>
-          <button className="px-4 py-1.5 text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white rounded-lg transition-colors">
-            確定
-          </button>
         </div>
       </div>
 

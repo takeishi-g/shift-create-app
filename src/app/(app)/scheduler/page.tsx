@@ -156,10 +156,22 @@ export default function ShiftEditPage() {
   }
 
   function setShift(staffId: string, dayIdx: number, code: ShiftCode) {
-    setShiftGrid(prev => ({
-      ...prev,
-      [staffId]: (prev[staffId] ?? []).map((c, i) => i === dayIdx ? code : c),
-    }))
+    setShiftGrid(prev => {
+      const row = [...(prev[staffId] ?? [])]
+      const prevCode = row[dayIdx]
+      row[dayIdx] = code
+
+      // 「夜」を選択 → 翌日を「明」に自動設定
+      if (code === '夜' && dayIdx + 1 < row.length) {
+        row[dayIdx + 1] = '明'
+      }
+      // 「夜」から別のシフトに変更 → 翌日が「明」なら「日」に戻す
+      if (prevCode === '夜' && code !== '夜' && dayIdx + 1 < row.length && row[dayIdx + 1] === '明') {
+        row[dayIdx + 1] = '日'
+      }
+
+      return { ...prev, [staffId]: row }
+    })
     setEditCell(null)
   }
 
@@ -408,14 +420,6 @@ export default function ShiftEditPage() {
                 </button>
               )
             })}
-            <button
-              onClick={() => setShift(editCell.staffId, editCell.dayIdx, '')}
-              className={`w-8 h-8 rounded text-[11px] font-bold bg-gray-100 text-gray-400 transition-transform hover:scale-110 ${
-                currentCode === '' ? 'ring-2 ring-rose-400' : ''
-              }`}
-            >
-              —
-            </button>
           </div>
         </div>
       )}
