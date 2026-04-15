@@ -225,7 +225,7 @@ export default function ShiftTablePage() {
                 >
                   <div className={`font-bold text-[11px] ${dayTextColor(dow, isHoliday)}`}>{day}</div>
                   <div className={`text-[9px] ${dayTextColor(dow, isHoliday)}`}>
-                    {isHoliday ? '祝' : DAY_LABELS[dow]}
+                    {DAY_LABELS[dow]}
                   </div>
                 </th>
               ))}
@@ -248,12 +248,15 @@ export default function ShiftTablePage() {
                 {days.map(({ day, dow, isHoliday }, i) => {
                   const code = shifts[i] ?? ''
                   const def = code ? SHIFT_DEF[code] : null
+                  const nonWorkday = dow === 0 || dow === 6 || isHoliday
+                  // 平日の日勤は非表示
+                  const showBadge = def && !(code === '日' && !nonWorkday)
                   return (
                     <td
                       key={day}
                       className={`text-center py-1 px-0 border-b border-gray-100 ${cellBg(dow, isHoliday)}`}
                     >
-                      {def ? (
+                      {showBadge ? (
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${def.bg} ${def.text}`}>
                           {def.code}
                         </span>
