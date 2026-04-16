@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from 'react'
 import { Plus } from 'lucide-react'
-import { StaffProfile, ShiftType } from '@/types'
-import { LeaveRequestTable, LeaveRequestWithStatus } from '@/components/features/leave-requests/LeaveRequestTable'
+import { LeaveRequest, StaffProfile, ShiftType } from '@/types'
+import { LeaveRequestTable } from '@/components/features/leave-requests/LeaveRequestTable'
 import { LeaveRequestFormDialog } from '@/components/features/leave-requests/LeaveRequestFormDialog'
 import { DeleteConfirmDialog } from '@/components/features/staff/DeleteConfirmDialog'
 import {
@@ -29,22 +29,22 @@ const MOCK_SHIFT_TYPES: ShiftType[] = [
   { id: 'sh-3', name: '夜勤', start_time: '21:00', end_time: '09:00', is_overnight: true, is_off: false, color: '#6366F1', display_order: 3, created_at: '' },
 ]
 
-const MOCK_REQUESTS: LeaveRequestWithStatus[] = [
+const MOCK_REQUESTS: LeaveRequest[] = [
   {
     id: 'lr-1', staff_id: 'st-1', date: '2025-04-15', type: '希望休',
-    preferred_shift_type_id: null, note: null, status: '承認済み',
+    preferred_shift_type_id: null, note: null,
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[0],
   },
   {
     id: 'lr-2', staff_id: 'st-2', date: '2025-04-20', type: '有給',
-    preferred_shift_type_id: null, note: '私用のため', status: '申請中',
+    preferred_shift_type_id: null, note: '私用のため',
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[1],
   },
   {
     id: 'lr-3', staff_id: 'st-3', date: '2025-04-23', type: 'シフト希望',
-    preferred_shift_type_id: 'sh-3', note: null, status: '承認済み',
+    preferred_shift_type_id: 'sh-3', note: null,
     created_at: '', updated_at: '',
     staff: MOCK_STAFF[2],
     preferred_shift_type: MOCK_SHIFT_TYPES[2],
@@ -59,35 +59,29 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => {
 let nextId = 100
 
 export default function LeaveRequestsPage() {
-  const [requests, setRequests] = useState<LeaveRequestWithStatus[]>(MOCK_REQUESTS)
+  const [requests, setRequests] = useState<LeaveRequest[]>(MOCK_REQUESTS)
   const [selectedMonth, setSelectedMonth] = useState('2025-04')
-  const [statusFilter, setStatusFilter] = useState<'all' | '申請中' | '承認済み' | '却下'>('all')
   const [formOpen, setFormOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<LeaveRequestWithStatus | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<LeaveRequestWithStatus | null>(null)
+  const [editTarget, setEditTarget] = useState<LeaveRequest | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<LeaveRequest | null>(null)
 
   const filtered = useMemo(() => {
-    return requests.filter((r) => {
-      const matchMonth = r.date.startsWith(selectedMonth)
-      const matchStatus = statusFilter === 'all' || r.status === statusFilter
-      return matchMonth && matchStatus
-    })
-  }, [requests, selectedMonth, statusFilter])
+    return requests.filter((r) => r.date.startsWith(selectedMonth))
+  }, [requests, selectedMonth])
 
   function handleAdd(data: {
-    staff_id: string; date: string; type: LeaveRequestWithStatus['type']
-    preferred_shift_type_id: string | null; status: LeaveRequestWithStatus['status']; note: string
+    staff_id: string; date: string; type: LeaveRequest['type']
+    preferred_shift_type_id: string | null; note: string
   }) {
     const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
     const preferred_shift_type = MOCK_SHIFT_TYPES.find((st) => st.id === data.preferred_shift_type_id)
-    const newReq: LeaveRequestWithStatus = {
+    const newReq: LeaveRequest = {
       id: `lr-${nextId++}`,
       staff_id: data.staff_id,
       date: data.date,
       type: data.type,
       preferred_shift_type_id: data.preferred_shift_type_id,
       note: data.note || null,
-      status: data.status,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       staff,
@@ -98,8 +92,8 @@ export default function LeaveRequestsPage() {
   }
 
   function handleEdit(data: {
-    staff_id: string; date: string; type: LeaveRequestWithStatus['type']
-    preferred_shift_type_id: string | null; status: LeaveRequestWithStatus['status']; note: string
+    staff_id: string; date: string; type: LeaveRequest['type']
+    preferred_shift_type_id: string | null; note: string
   }) {
     if (!editTarget) return
     const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
@@ -107,14 +101,7 @@ export default function LeaveRequestsPage() {
     setRequests((prev) =>
       prev.map((r) =>
         r.id === editTarget.id
-          ? {
-              ...r,
-              ...data,
-              note: data.note || null,
-              updated_at: new Date().toISOString(),
-              staff,
-              preferred_shift_type,
-            }
+          ? { ...r, ...data, note: data.note || null, updated_at: new Date().toISOString(), staff, preferred_shift_type }
           : r
       )
     )
@@ -142,7 +129,7 @@ export default function LeaveRequestsPage() {
         </button>
       </div>
 
-      {/* フィルター */}
+      {/* 月フィルター */}
       <div className="flex items-center gap-3">
         <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
           <SelectTrigger className="w-[160px] bg-white border-gray-200">
@@ -152,18 +139,6 @@ export default function LeaveRequestsPage() {
             {MONTHS.map((m) => (
               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
             ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={statusFilter} onValueChange={(v) => v && setStatusFilter(v as typeof statusFilter)}>
-          <SelectTrigger className="w-[160px] bg-white border-gray-200">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">ステータス: 全て</SelectItem>
-            <SelectItem value="申請中">申請中</SelectItem>
-            <SelectItem value="承認済み">承認済み</SelectItem>
-            <SelectItem value="却下">却下</SelectItem>
           </SelectContent>
         </Select>
       </div>

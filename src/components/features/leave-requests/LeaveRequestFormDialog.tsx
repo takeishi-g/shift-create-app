@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { LeaveType, StaffProfile, ShiftType } from '@/types'
-import { LeaveStatus, LeaveRequestWithStatus } from './LeaveRequestTable'
+import { LeaveRequest, LeaveType, StaffProfile, ShiftType } from '@/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -26,7 +25,6 @@ interface LeaveFormData {
   date: string
   type: LeaveType
   preferred_shift_type_id: string | null
-  status: LeaveStatus
   note: string
 }
 
@@ -34,7 +32,7 @@ interface LeaveRequestFormDialogProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: LeaveFormData) => void
-  initialData?: LeaveRequestWithStatus | null
+  initialData?: LeaveRequest | null
   staffList: StaffProfile[]
   shiftTypes: ShiftType[]
 }
@@ -44,7 +42,6 @@ const defaultForm: LeaveFormData = {
   date: '',
   type: '希望休',
   preferred_shift_type_id: null,
-  status: '申請中',
   note: '',
 }
 
@@ -67,7 +64,6 @@ export function LeaveRequestFormDialog({
           date: initialData.date,
           type: initialData.type,
           preferred_shift_type_id: initialData.preferred_shift_type_id,
-          status: initialData.status,
           note: initialData.note ?? '',
         })
       } else {
@@ -102,9 +98,9 @@ export function LeaveRequestFormDialog({
               onValueChange={(v) => v && setForm({ ...form, staff_id: v })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="スタッフを選択">
-                  {(value: string | null) => value ? (staffList.find((s) => s.id === value)?.name ?? value) : 'スタッフを選択'}
-                </SelectValue>
+                <span className={form.staff_id ? '' : 'text-gray-400'}>
+                  {staffList.find(s => s.id === form.staff_id)?.name ?? 'スタッフを選択'}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {staffList.map((s) => (
@@ -165,24 +161,6 @@ export function LeaveRequestFormDialog({
               </Select>
             </div>
           )}
-
-          {/* ステータス */}
-          <div className="space-y-1.5">
-            <Label>ステータス</Label>
-            <Select
-              value={form.status}
-              onValueChange={(v) => v && setForm({ ...form, status: v as LeaveStatus })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="申請中">申請中</SelectItem>
-                <SelectItem value="承認済み">承認済み</SelectItem>
-                <SelectItem value="却下">却下</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
 
           {/* 備考 */}
           <div className="space-y-1.5">

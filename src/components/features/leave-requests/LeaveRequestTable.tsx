@@ -14,12 +14,6 @@ import { Pencil, Trash2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ja } from 'date-fns/locale'
 
-export type LeaveStatus = '申請中' | '承認済み' | '却下'
-
-export interface LeaveRequestWithStatus extends LeaveRequest {
-  status: LeaveStatus
-}
-
 const LEAVE_TYPE_CONFIG: Record<LeaveType, { label: string; className: string }> = {
   希望休: { label: '希望休', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
   有給: { label: '有給', className: 'bg-purple-100 text-purple-700 hover:bg-purple-100' },
@@ -28,16 +22,10 @@ const LEAVE_TYPE_CONFIG: Record<LeaveType, { label: string; className: string }>
   他: { label: 'その他', className: 'bg-pink-100 text-pink-600 hover:bg-pink-100' },
 }
 
-const STATUS_CONFIG: Record<LeaveStatus, { label: string; className: string }> = {
-  申請中: { label: '申請中', className: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-100' },
-  承認済み: { label: '承認済み', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
-  却下: { label: '却下', className: 'bg-red-100 text-red-600 hover:bg-red-100' },
-}
-
 interface LeaveRequestTableProps {
-  requests: LeaveRequestWithStatus[]
-  onEdit: (req: LeaveRequestWithStatus) => void
-  onDelete: (req: LeaveRequestWithStatus) => void
+  requests: LeaveRequest[]
+  onEdit: (req: LeaveRequest) => void
+  onDelete: (req: LeaveRequest) => void
 }
 
 export function LeaveRequestTable({ requests, onEdit, onDelete }: LeaveRequestTableProps) {
@@ -50,14 +38,13 @@ export function LeaveRequestTable({ requests, onEdit, onDelete }: LeaveRequestTa
             <TableHead className="w-[160px] text-xs font-semibold text-gray-400 px-4">日付</TableHead>
             <TableHead className="w-[130px] text-xs font-semibold text-gray-400 px-4">種別</TableHead>
             <TableHead className="text-xs font-semibold text-gray-400 px-4">備考</TableHead>
-            <TableHead className="w-[120px] text-xs font-semibold text-gray-400 px-4">ステータス</TableHead>
             <TableHead className="w-[160px] text-xs font-semibold text-gray-400 px-4 text-center">アクション</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {requests.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-sm text-gray-400 py-12">
+              <TableCell colSpan={5} className="text-center text-sm text-gray-400 py-12">
                 申請が登録されていません
               </TableCell>
             </TableRow>
@@ -71,7 +58,6 @@ export function LeaveRequestTable({ requests, onEdit, onDelete }: LeaveRequestTa
               }
             })()
             const typeConfig = LEAVE_TYPE_CONFIG[req.type]
-            const statusConfig = STATUS_CONFIG[req.status]
 
             return (
               <TableRow
@@ -94,11 +80,6 @@ export function LeaveRequestTable({ requests, onEdit, onDelete }: LeaveRequestTa
                 </TableCell>
                 <TableCell className="px-4 text-gray-600 text-sm">
                   {req.note ?? <span className="text-gray-300">—</span>}
-                </TableCell>
-                <TableCell className="px-4">
-                  <Badge className={`text-xs font-medium px-2 py-0.5 rounded ${statusConfig.className}`}>
-                    {statusConfig.label}
-                  </Badge>
                 </TableCell>
                 <TableCell className="px-4">
                   <div className="flex items-center justify-center gap-2">
