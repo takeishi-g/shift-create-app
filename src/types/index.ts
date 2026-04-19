@@ -74,7 +74,6 @@ export interface ShiftConstraints {
   max_consecutive_work_days: number
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
-  max_night_shifts_per_month: number
   updated_at: string
 }
 

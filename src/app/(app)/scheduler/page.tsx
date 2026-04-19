@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { getDaysInMonth, getDay } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
+import { Plus } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -10,13 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { StaffProfile, deriveWorkHoursType } from '@/types'
+import { StaffProfile, ShiftType, LeaveRequest, deriveWorkHoursType } from '@/types'
+import { MOCK_STAFF, MOCK_SHIFT_TYPES } from '@/lib/mock'
+import { LeaveRequestTable } from '@/components/features/leave-requests/LeaveRequestTable'
+import { LeaveRequestFormDialog } from '@/components/features/leave-requests/LeaveRequestFormDialog'
+import { DeleteConfirmDialog } from '@/components/features/staff/DeleteConfirmDialog'
 
-// ------
-// TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
-// ------
-
-type ShiftCode = '早' | '日' | '遅' | '夜' | '明' | '公' | '有' | '他' | ''
+type ShiftCode = '早' | '日' | '遅' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
 
 interface ShiftDef {
   code: ShiftCode
@@ -27,25 +28,27 @@ interface ShiftDef {
 }
 
 const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
-  早: { code: '早', label: '早番',   bg: 'bg-sky-200',     text: 'text-sky-800',    ampm: 'AM' },
-  日: { code: '日', label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
-  遅: { code: '遅', label: '遅番',   bg: 'bg-orange-200',  text: 'text-orange-800', ampm: 'PM' },
-  夜: { code: '夜', label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
-  明: { code: '明', label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
-  公: { code: '公', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
-  有: { code: '有', label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
-  他: { code: '他', label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
+  早:  { code: '早',  label: '早番',   bg: 'bg-sky-200',     text: 'text-sky-800',    ampm: 'AM' },
+  日:  { code: '日',  label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
+  遅:  { code: '遅',  label: '遅番',   bg: 'bg-orange-200',  text: 'text-orange-800', ampm: 'PM' },
+  夜:  { code: '夜',  label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
+  明:  { code: '明',  label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
+  公:  { code: '公',  label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
+  有:  { code: '有',  label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
+  他:  { code: '他',  label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
+  希休: { code: '希休', label: '希望休', bg: 'bg-rose-200',   text: 'text-rose-700',   ampm: 'off' },
 }
 
 const SHIFT_OPTIONS: Exclude<ShiftCode, ''>[] = ['早', '日', '遅', '夜', '明', '公', '有', '他']
 
-const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長', work_start_time: '08:30', work_end_time: '17:30', experience_years: 15, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任', work_start_time: '08:30', work_end_time: '17:30', experience_years: 12, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 8,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '堀 奈々美',  qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 6,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-5', name: '伊藤 健二',  qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
+
+const MOCK_LEAVE_REQUESTS: LeaveRequest[] = [
+  { id: 'lr-1', staff_id: 'st-1', date: '2025-04-15', type: '希望休', preferred_shift_type_id: null, note: null,    created_at: '', updated_at: '', staff: MOCK_STAFF[0] },
+  { id: 'lr-2', staff_id: 'st-2', date: '2025-04-20', type: '有給',   preferred_shift_type_id: null, note: '私用のため', created_at: '', updated_at: '', staff: MOCK_STAFF[1] },
+  { id: 'lr-3', staff_id: 'st-3', date: '2025-04-23', type: 'シフト希望', preferred_shift_type_id: 'sh-3', note: null, created_at: '', updated_at: '', staff: MOCK_STAFF[2], preferred_shift_type: MOCK_SHIFT_TYPES[2] },
 ]
+
+let nextLeaveId = 100
 
 function makeDefaultShifts(daysInMonth: number): ShiftCode[] {
   return Array(daysInMonth).fill('日')
@@ -107,6 +110,96 @@ export default function ShiftEditPage() {
   const [confirmed, setConfirmed] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
 
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(MOCK_LEAVE_REQUESTS)
+  const [leaveFormOpen, setLeaveFormOpen] = useState(false)
+  const [leaveEditTarget, setLeaveEditTarget] = useState<LeaveRequest | null>(null)
+  const [leaveDeleteTarget, setLeaveDeleteTarget] = useState<LeaveRequest | null>(null)
+  const [leaveCellPreset, setLeaveCellPreset] = useState<{ staff_id: string; date: string } | undefined>(undefined)
+
+  const filteredLeaveRequests = useMemo(
+    () => leaveRequests.filter((r) => r.date.startsWith(selectedMonth)),
+    [leaveRequests, selectedMonth]
+  )
+
+  const leaveRequestMap = useMemo(() => {
+    const map = new Map<string, LeaveRequest>()
+    leaveRequests.forEach(r => map.set(`${r.staff_id}:${r.date}`, r))
+    return map
+  }, [leaveRequests])
+
+  function leaveTypeToShiftCode(type: LeaveRequest['type']): ShiftCode | null {
+    switch (type) {
+      case '希望休':   return '希休'
+      case '有給':     return '有'
+      case '特別休暇': return '他'
+      case '他':       return '他'
+      default:         return null
+    }
+  }
+
+  function applyLeaveToGrid(staffId: string, date: string, type: LeaveRequest['type']) {
+    const code = leaveTypeToShiftCode(type)
+    if (!code) return
+    const [year, month, day] = date.split('-').map(Number)
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
+    if (year !== selYear || month !== selMonth) return
+    const dayIdx = day - 1
+    setShiftGrid(prev => {
+      const row = [...(prev[staffId] ?? [])]
+      row[dayIdx] = code
+      return { ...prev, [staffId]: row }
+    })
+  }
+
+  function handleLeaveAdd(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
+    if (leaveRequestMap.has(`${data.staff_id}:${data.date}`)) return
+    const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
+    const preferred_shift_type = MOCK_SHIFT_TYPES.find((st) => st.id === data.preferred_shift_type_id)
+    setLeaveRequests((prev) => [...prev, {
+      id: `lr-${nextLeaveId++}`,
+      ...data,
+      note: data.note || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      staff,
+      preferred_shift_type,
+    }])
+    applyLeaveToGrid(data.staff_id, data.date, data.type)
+    setLeaveFormOpen(false)
+  }
+
+  function handleLeaveEdit(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
+    if (!leaveEditTarget) return
+    const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
+    const preferred_shift_type = MOCK_SHIFT_TYPES.find((st) => st.id === data.preferred_shift_type_id)
+    setLeaveRequests((prev) =>
+      prev.map((r) =>
+        r.id === leaveEditTarget.id
+          ? { ...r, ...data, note: data.note || null, updated_at: new Date().toISOString(), staff, preferred_shift_type }
+          : r
+      )
+    )
+    applyLeaveToGrid(data.staff_id, data.date, data.type)
+    setLeaveEditTarget(null)
+    setLeaveFormOpen(false)
+  }
+
+  function handleLeaveDelete() {
+    if (!leaveDeleteTarget) return
+    setLeaveRequests((prev) => prev.filter((r) => r.id !== leaveDeleteTarget.id))
+    const [year, month, day] = leaveDeleteTarget.date.split('-').map(Number)
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
+    if (year === selYear && month === selMonth) {
+      const dayIdx = day - 1
+      setShiftGrid(prev => {
+        const row = [...(prev[leaveDeleteTarget.staff_id] ?? [])]
+        row[dayIdx] = '日'
+        return { ...prev, [leaveDeleteTarget.staff_id]: row }
+      })
+    }
+    setLeaveDeleteTarget(null)
+  }
+
   // 勤務制約設定で保存されたお風呂の曜日を読み込む
   useEffect(() => {
     try {
@@ -128,7 +221,7 @@ export default function ShiftEditPage() {
   // 月変更時にシフトとお風呂の日をリセット
   useEffect(() => {
     const newGrid: Record<string, ShiftCode[]> = {}
-    MOCK_STAFF.forEach((s, idx) => {
+    MOCK_STAFF.forEach((s) => {
       newGrid[s.id] = makeDefaultShifts(days.length)
     })
     setShiftGrid(newGrid)
@@ -213,6 +306,15 @@ export default function ShiftEditPage() {
 
   const currentCode = editCell ? (shiftGrid[editCell.staffId]?.[editCell.dayIdx] ?? '') : ''
 
+  const popoverDate = (() => {
+    if (!editCell) return ''
+    const [year, month] = selectedMonth.split('-').map(Number)
+    const day = editCell.dayIdx + 1
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  })()
+  const popoverLeave = editCell ? (leaveRequestMap.get(`${editCell.staffId}:${popoverDate}`) ?? null) : null
+  const LEAVE_TYPE_LABEL: Record<string, string> = { 希望休: '希望休', 有給: '有給', 特別休暇: '特別休暇', シフト希望: 'シフト希望', 他: 'その他' }
+
   return (
     <div className="space-y-4 p-4">
       {/* ヘッダー */}
@@ -293,7 +395,7 @@ export default function ShiftEditPage() {
             {MOCK_STAFF.map((staff, staffIdx) => {
               const shifts = shiftGrid[staff.id] ?? []
               const nightCount = shifts.filter(s => s === '夜').length
-              const offCount = shifts.filter(s => s === '公' || s === '有').length
+              const offCount = shifts.filter(s => s === '公' || s === '有' || s === '希休').length
               return (
                 <tr key={staff.id} className={staffIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}>
                   {/* 氏名（sticky） */}
@@ -317,7 +419,7 @@ export default function ShiftEditPage() {
                         className={`text-center py-1 px-0 border-b border-gray-100 cursor-pointer hover:brightness-95 transition-[filter] ${cellBg(dow, isHoliday)} ${isEditing ? 'outline-2 outline-rose-400 -outline-offset-2' : ''}`}
                       >
                         {showBadge ? (
-                          <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${def.bg} ${def.text}`}>
+                          <span className={`inline-flex items-center justify-center h-5 rounded font-bold ${def.code.length > 1 ? 'w-6 text-[8px]' : 'w-5 text-[10px]'} ${def.bg} ${def.text}`}>
                             {def.code}
                           </span>
                         ) : (
@@ -402,6 +504,42 @@ export default function ShiftEditPage() {
         </div>
       </div>
 
+      {/* 希望休・申請リスト */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-gray-700">希望休・申請一覧</h2>
+          <button
+            onClick={() => { setLeaveEditTarget(null); setLeaveFormOpen(true) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold rounded-lg transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            希望休を追加
+          </button>
+        </div>
+        <LeaveRequestTable
+          requests={filteredLeaveRequests}
+          onEdit={(r) => { setLeaveEditTarget(r); setLeaveFormOpen(true) }}
+          onDelete={(r) => setLeaveDeleteTarget(r)}
+        />
+      </div>
+
+      <LeaveRequestFormDialog
+        open={leaveFormOpen}
+        onClose={() => { setLeaveFormOpen(false); setLeaveEditTarget(null); setLeaveCellPreset(undefined) }}
+        onSubmit={leaveEditTarget ? handleLeaveEdit : handleLeaveAdd}
+        initialData={leaveEditTarget}
+        defaultValues={leaveCellPreset}
+        staffList={MOCK_STAFF}
+        shiftTypes={MOCK_SHIFT_TYPES}
+      />
+
+      <DeleteConfirmDialog
+        open={!!leaveDeleteTarget}
+        targetName={leaveDeleteTarget?.staff?.name ? `${leaveDeleteTarget.staff.name}の${leaveDeleteTarget.date}申請` : ''}
+        onClose={() => setLeaveDeleteTarget(null)}
+        onConfirm={handleLeaveDelete}
+      />
+
       {/* シフト編集ポップオーバー */}
       {editCell && (
         <div
@@ -426,6 +564,46 @@ export default function ShiftEditPage() {
               )
             })}
           </div>
+          {popoverLeave ? (
+            <div className="mt-2 border-t border-rose-100 pt-2 space-y-1">
+              <p className="text-[10px] text-gray-400">希望休・申請 登録済み</p>
+              <div className="text-[11px] text-gray-700 space-y-0.5">
+                <div><span className="text-gray-400">種別：</span>{LEAVE_TYPE_LABEL[popoverLeave.type]}</div>
+                {popoverLeave.preferred_shift_type && (
+                  <div><span className="text-gray-400">希望：</span>{popoverLeave.preferred_shift_type.name}</div>
+                )}
+                {popoverLeave.note && (
+                  <div><span className="text-gray-400">備考：</span>{popoverLeave.note}</div>
+                )}
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => { setLeaveEditTarget(popoverLeave); setLeaveFormOpen(true); setEditCell(null) }}
+                  className="flex-1 text-[10px] text-rose-500 border border-rose-200 rounded-md py-1 hover:bg-rose-50 transition-colors"
+                >
+                  編集
+                </button>
+                <button
+                  onClick={() => { setLeaveDeleteTarget(popoverLeave); setEditCell(null) }}
+                  className="flex-1 text-[10px] text-red-500 border border-red-200 rounded-md py-1 hover:bg-red-50 transition-colors"
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setLeaveCellPreset({ staff_id: editCell.staffId, date: popoverDate })
+                setLeaveEditTarget(null)
+                setLeaveFormOpen(true)
+                setEditCell(null)
+              }}
+              className="mt-2 w-full text-[10px] text-rose-500 border border-rose-200 rounded-md py-1 hover:bg-rose-50 transition-colors"
+            >
+              + 希望休を追加
+            </button>
+          )}
         </div>
       )}
     </div>

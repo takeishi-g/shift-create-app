@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { StaffProfile, PairConstraintType } from '@/types'
+import { StaffProfile, ShiftType, PairConstraintType } from '@/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,27 +16,19 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
-
-export type PairShiftType = '日勤' | '夜勤' | 'all'
 
 const CONSTRAINT_TYPE_LABEL: Record<string, string> = {
   must_pair:     '必ペア（同じシフトに入れる）',
   must_not_pair: 'ペア禁止（同じシフトに入れない）',
 }
 
-const SHIFT_TYPE_LABEL: Record<string, string> = {
-  all:  'すべて',
-  日勤: '日勤',
-  夜勤: '夜勤',
-}
-
 export interface PairConstraintFormData {
   staff_id_a: string
   staff_id_b: string
   constraint_type: PairConstraintType
-  shift_type: PairShiftType
+  /** shift_type_id（UUID）。'all' は全シフト対象 */
+  shift_type_id: string | 'all'
 }
 
 interface PairConstraintDialogProps {
@@ -44,13 +36,14 @@ interface PairConstraintDialogProps {
   onClose: () => void
   onSubmit: (data: PairConstraintFormData) => void
   staffList: StaffProfile[]
+  shiftTypes: ShiftType[]
 }
 
 const defaultForm: PairConstraintFormData = {
   staff_id_a: '',
   staff_id_b: '',
   constraint_type: 'must_pair',
-  shift_type: 'all',
+  shift_type_id: 'all',
 }
 
 export function PairConstraintDialog({
@@ -58,6 +51,7 @@ export function PairConstraintDialog({
   onClose,
   onSubmit,
   staffList,
+  shiftTypes,
 }: PairConstraintDialogProps) {
   const [form, setForm] = useState<PairConstraintFormData>(defaultForm)
 
@@ -101,16 +95,23 @@ export function PairConstraintDialog({
           <div className="space-y-1.5">
             <Label>対象シフト</Label>
             <Select
-              value={form.shift_type}
-              onValueChange={(v) => v && setForm({ ...form, shift_type: v as PairShiftType })}
+              value={form.shift_type_id}
+              onValueChange={(v) => v && setForm({ ...form, shift_type_id: v })}
             >
               <SelectTrigger>
-                <span>{SHIFT_TYPE_LABEL[form.shift_type]}</span>
+                <span>
+                  {form.shift_type_id === 'all'
+                    ? 'すべて'
+                    : shiftTypes.find((st) => st.id === form.shift_type_id)?.name ?? 'すべて'}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">すべて</SelectItem>
-                <SelectItem value="日勤">日勤</SelectItem>
-                <SelectItem value="夜勤">夜勤</SelectItem>
+                {shiftTypes
+                  .filter((st) => !st.is_off)
+                  .map((st) => (
+                    <SelectItem key={st.id} value={st.id}>{st.name}</SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>

@@ -6,24 +6,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { StaffProfile, StaffPairConstraint, PairConstraintType } from '@/types'
+import { StaffPairConstraint, PairConstraintType } from '@/types'
 import { PairConstraintDialog, PairConstraintFormData } from '@/components/features/constraints/PairConstraintDialog'
+import { MOCK_STAFF, MOCK_SHIFT_TYPES } from '@/lib/mock'
 
-const SHIFT_TYPE_LABEL: Record<string, string> = {
-  all:  'すべて',
-  日勤: '日勤',
-  夜勤: '夜勤',
+function shiftTypeLabel(id: string | null): string {
+  if (!id) return 'すべて'
+  return MOCK_SHIFT_TYPES.find((st) => st.id === id)?.name ?? 'すべて'
 }
-
-// ------
-// TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
-// ------
-const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 15, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 12, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般',  work_start_time: '08:30', work_end_time: '17:30', experience_years: 8,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '伊藤 健二',  qualification: '准看護師', role: '一般',  work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-]
 
 interface MinStaffing {
   早番: number
@@ -56,8 +46,8 @@ const INITIAL_WORK_RULES: WorkRules = {
 }
 
 const INITIAL_PAIRS: StaffPairConstraint[] = [
-  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair',     shift_type_id: '日勤', note: null, created_at: '' },
-  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: '夜勤', note: null, created_at: '' },
+  { id: 'pc-1', staff_id_a: 'st-1', staff_id_b: 'st-2', constraint_type: 'must_pair',     shift_type_id: 'sh-2', note: null, created_at: '' },
+  { id: 'pc-2', staff_id_a: 'st-3', staff_id_b: 'st-4', constraint_type: 'must_not_pair', shift_type_id: 'sh-3', note: null, created_at: '' },
 ]
 
 let nextPairId = 100
@@ -109,7 +99,7 @@ export default function ConstraintsPage() {
       staff_id_a: data.staff_id_a,
       staff_id_b: data.staff_id_b,
       constraint_type: data.constraint_type,
-      shift_type_id: data.shift_type === 'all' ? null : data.shift_type,
+      shift_type_id: data.shift_type_id === 'all' ? null : data.shift_type_id,
       note: null,
       created_at: new Date().toISOString(),
     }
@@ -262,7 +252,7 @@ export default function ConstraintsPage() {
                     <span className="text-gray-400">↔</span>
                     <span>{staffName(pair.staff_id_b)}</span>
                     <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500">
-                      {SHIFT_TYPE_LABEL[pair.shift_type_id ?? 'all']}
+                      {shiftTypeLabel(pair.shift_type_id)}
                     </span>
                   </div>
                   <button onClick={() => setPairs((prev) => prev.filter((p) => p.id !== pair.id))}
@@ -281,6 +271,7 @@ export default function ConstraintsPage() {
         onClose={() => setPairDialogOpen(false)}
         onSubmit={handleAddPair}
         staffList={MOCK_STAFF}
+        shiftTypes={MOCK_SHIFT_TYPES}
       />
     </div>
   )
