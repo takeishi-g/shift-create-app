@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   Users,
   CalendarDays,
-  CalendarOff,
   Settings,
   Wand2,
   ChevronLeft,
@@ -19,7 +18,6 @@ const navItems = [
   { href: '/dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
   { href: '/shift-table', label: 'シフト表', icon: CalendarDays },
   { href: '/scheduler', label: 'シフト編集', icon: Wand2 },
-  { href: '/leave-requests', label: '希望休管理', icon: CalendarOff },
   { href: '/staff', label: 'スタッフ管理', icon: Users },
   { href: '/constraints', label: '勤務制約設定', icon: Settings },
 ]

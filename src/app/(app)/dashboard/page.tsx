@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { addDays, format, getDay } from 'date-fns'
 import { ja } from 'date-fns/locale'
-import { Users, FileText, ChevronRight, Calendar, UserPlus, Sparkles, ClipboardList } from 'lucide-react'
+import { Users, FileText, ChevronRight, Calendar, UserPlus, Sparkles } from 'lucide-react'
 
 // ------
 // TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
@@ -72,12 +72,6 @@ const QUICK_ACTIONS = [
     icon: <Sparkles className="h-5 w-5 text-rose-400" />,
     title: 'シフトを生成する',
     sub: 'コンフィグ / スタッフ・希望休を確認',
-  },
-  {
-    href: '/leave-requests',
-    icon: <ClipboardList className="h-5 w-5 text-rose-400" />,
-    title: '希望休を管理する',
-    sub: 'スタッフ希望・休暇申請を入力',
   },
   {
     href: '/staff',
@@ -202,8 +196,8 @@ export default function DashboardPage() {
       <div className="rounded-xl border border-rose-100 bg-white p-5 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">備考</h2>
-          <Link href="/leave-requests" className="text-xs text-rose-500 hover:text-rose-600 font-medium">
-            すべて見る →
+          <Link href="/scheduler" className="text-xs text-rose-500 hover:text-rose-600 font-medium">
+            シフト編集で確認 →
           </Link>
         </div>
         <table className="w-full text-sm">

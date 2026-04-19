@@ -33,6 +33,7 @@ interface LeaveRequestFormDialogProps {
   onClose: () => void
   onSubmit: (data: LeaveFormData) => void
   initialData?: LeaveRequest | null
+  defaultValues?: { staff_id?: string; date?: string }
   staffList: StaffProfile[]
   shiftTypes: ShiftType[]
 }
@@ -50,6 +51,7 @@ export function LeaveRequestFormDialog({
   onClose,
   onSubmit,
   initialData,
+  defaultValues,
   staffList,
   shiftTypes,
 }: LeaveRequestFormDialogProps) {
@@ -67,10 +69,10 @@ export function LeaveRequestFormDialog({
           note: initialData.note ?? '',
         })
       } else {
-        setForm(defaultForm)
+        setForm({ ...defaultForm, ...(defaultValues ?? {}) })
       }
     }
-  }, [open, initialData])
+  }, [open, initialData, defaultValues])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -137,7 +139,7 @@ export function LeaveRequestFormDialog({
                 <SelectItem value="有給">有給</SelectItem>
                 <SelectItem value="特別休暇">特別休暇</SelectItem>
                 <SelectItem value="シフト希望">シフト希望</SelectItem>
-                <SelectItem value="他">その他（産休・退職など）</SelectItem>
+                <SelectItem value="他">その他</SelectItem>
               </SelectContent>
             </Select>
           </div>
