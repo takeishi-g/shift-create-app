@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { StaffProfile, StaffQualification, StaffRole } from '@/types'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,8 @@ interface StaffFormData {
   work_end_time: string
   experience_years: number
   max_night_shifts: number
+  off_days_of_week: number[]
+  off_on_holidays: boolean
 }
 
 interface StaffFormDialogProps {
@@ -37,14 +40,18 @@ interface StaffFormDialogProps {
   initialData?: Partial<StaffProfile> | null
 }
 
+const DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土']
+
 const defaultForm: StaffFormData = {
   name: '',
   qualification: '正看護師',
   role: '一般',
-  work_start_time: '08:30',
-  work_end_time: '17:30',
+  work_start_time: '09:00',
+  work_end_time: '17:00',
   experience_years: 0,
   max_night_shifts: 8,
+  off_days_of_week: [],
+  off_on_holidays: false,
 }
 
 const QUALIFICATION_LABEL: Record<StaffQualification, string> = {
@@ -74,10 +81,12 @@ export function StaffFormDialog({
           name: initialData.name ?? '',
           qualification: initialData.qualification ?? '正看護師',
           role: initialData.role ?? '一般',
-          work_start_time: initialData.work_start_time ?? '08:30',
-          work_end_time: initialData.work_end_time ?? '17:30',
+          work_start_time: initialData.work_start_time ?? '09:00',
+          work_end_time: initialData.work_end_time ?? '17:00',
           experience_years: initialData.experience_years ?? 0,
           max_night_shifts: initialData.max_night_shifts ?? 8,
+          off_days_of_week: initialData.off_days_of_week ?? [],
+          off_on_holidays: initialData.off_on_holidays ?? false,
         })
       } else {
         setForm(defaultForm)
@@ -163,9 +172,43 @@ export function StaffFormDialog({
                 className="w-32"
               />
             </div>
-            <p className="text-xs text-gray-400">
-              {form.work_start_time < '12:00' ? 'AM帯（日勤者AM集計）' : 'PM帯（日勤者PM集計）'}
-            </p>
+          </div>
+
+          {/* 定休曜日・祝日 */}
+          <div className="space-y-1.5">
+            <Label>定休日</Label>
+            <div className="flex items-end gap-3">
+              <div className="flex gap-2">
+                {DOW_LABELS.map((label, dow) => (
+                  <label key={dow} className="flex flex-col items-center gap-1 cursor-pointer">
+                    <span className={`text-xs font-medium ${dow === 0 ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-gray-500'}`}>
+                      {label}
+                    </span>
+                    <Checkbox
+                      checked={form.off_days_of_week.includes(dow)}
+                      onCheckedChange={(checked) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          off_days_of_week: checked
+                            ? [...prev.off_days_of_week, dow].sort()
+                            : prev.off_days_of_week.filter((d) => d !== dow),
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="w-px h-6 bg-gray-200 self-center" />
+              <label className="flex flex-col items-center gap-1 cursor-pointer">
+                <span className="text-xs font-medium text-rose-400">祝日</span>
+                <Checkbox
+                  checked={form.off_on_holidays}
+                  onCheckedChange={(checked) =>
+                    setForm((prev) => ({ ...prev, off_on_holidays: !!checked }))
+                  }
+                />
+              </label>
+            </div>
           </div>
 
           {/* 経験年数・月間最大夜勤回数（2列） */}

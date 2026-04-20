@@ -19,6 +19,10 @@ export interface StaffProfile {
   work_end_time: string
   max_night_shifts: number
   experience_years: number
+  /** 定休曜日（0=日〜6=土）の配列 */
+  off_days_of_week: number[]
+  /** 祝日を定休にするか */
+  off_on_holidays: boolean
   is_active: boolean
   created_at: string
   updated_at: string
@@ -65,6 +69,7 @@ export interface BathDay {
 // =============================
 export interface ShiftConstraints {
   id: string
+  year_month: string | null
   /** シフト種別IDごとの最低配置人数 */
   min_staff_per_shift: Record<string, number>
   /** 土日の最低配置人数 */
@@ -74,6 +79,9 @@ export interface ShiftConstraints {
   max_consecutive_work_days: number
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
+  target_off_days: number
+  /** お風呂の曜日（0=日〜6=土）*/
+  bath_days_of_week: number[]
   updated_at: string
 }
 

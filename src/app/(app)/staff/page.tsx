@@ -1,25 +1,13 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Plus, Search } from 'lucide-react'
 import { StaffTable } from '@/components/features/staff/StaffTable'
 import { StaffFormDialog } from '@/components/features/staff/StaffFormDialog'
 import { DeleteConfirmDialog } from '@/components/features/staff/DeleteConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { StaffProfile } from '@/types'
-
-// ------
-// TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
-// ------
-const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '山田 太郎', qualification: '正看護師', role: '師長', work_start_time: '08:30', work_end_time: '17:30', experience_years: 10, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '鈴木 花子', qualification: '正看護師', role: '主任', work_start_time: '08:30', work_end_time: '17:30', experience_years: 7, max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '田中 一郎', qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 5, max_night_shifts: 8, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '佐藤 美咲', qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 3, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-5', name: '伊藤 健二', qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 1, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-]
-
-let nextId = 100
+import { createClient } from '@/lib/supabase/client'
 
 type StaffFormData = {
   name: string
@@ -29,50 +17,68 @@ type StaffFormData = {
   work_end_time: string
   experience_years: number
   max_night_shifts: number
+  off_days_of_week: number[]
+  off_on_holidays: boolean
 }
 
 export default function StaffPage() {
-  const [staffList, setStaffList] = useState<StaffProfile[]>(MOCK_STAFF)
+  const [staffList, setStaffList] = useState<StaffProfile[]>([])
   const [search, setSearch] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<StaffProfile | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<StaffProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase
+        .from('staff_profiles')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at')
+      if (data) setStaffList(data)
+      setLoading(false)
+    }
+    load()
+  }, [])
 
   const filtered = useMemo(
     () => staffList.filter((s) => s.name.includes(search)),
     [staffList, search]
   )
 
-  function handleAdd(data: StaffFormData) {
-    const newStaff: StaffProfile = {
-      id: `st-${nextId++}`,
-      ...data,
-      is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    setStaffList((prev) => [...prev, newStaff])
+  async function handleAdd(data: StaffFormData) {
+    const { data: inserted } = await supabase
+      .from('staff_profiles')
+      .insert({ ...data, is_active: true })
+      .select()
+      .single()
+    if (inserted) setStaffList((prev) => [...prev, inserted])
     setFormOpen(false)
   }
 
-  function handleEdit(data: StaffFormData) {
+  async function handleEdit(data: StaffFormData) {
     if (!editTarget) return
-    setStaffList((prev) =>
-      prev.map((s) =>
-        s.id === editTarget.id
-          ? { ...s, ...data, updated_at: new Date().toISOString() }
-          : s
-      )
-    )
+    const { data: updated } = await supabase
+      .from('staff_profiles')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', editTarget.id)
+      .select()
+      .single()
+    if (updated) setStaffList((prev) => prev.map((s) => s.id === editTarget.id ? updated : s))
     setEditTarget(null)
     setFormOpen(false)
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deleteTarget) return
+    await supabase.from('staff_profiles').update({ is_active: false }).eq('id', deleteTarget.id)
     setStaffList((prev) => prev.filter((s) => s.id !== deleteTarget.id))
     setDeleteTarget(null)
   }
+
+  if (loading) return <div className="p-6 text-sm text-gray-500">読み込み中...</div>
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-5">

@@ -1,20 +1,11 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { addDays, format, getDay } from 'date-fns'
+import { addDays, format, getDay, startOfMonth, endOfMonth } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { Users, FileText, ChevronRight, Calendar, UserPlus, Sparkles } from 'lucide-react'
-
-// ------
-// TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
-// ------
-
-interface ActivityItem {
-  id: string
-  message: string
-  date: string
-  color: 'rose' | 'green' | 'blue' | 'gray'
-}
+import { createClient } from '@/lib/supabase/client'
 
 interface NoteItem {
   name: string
@@ -23,39 +14,22 @@ interface NoteItem {
 }
 
 interface DayShift {
-  label: string   // 例: "4/15（火）"
-  早: number
+  label: string
   日: number
-  遅: number
   夜: number
 }
 
-const MOCK_ACTIVITIES: ActivityItem[] = [
-  { id: '1', message: '山田 太郎さんの希望休を登録しました', date: '4/15', color: 'rose' },
-  { id: '2', message: '2025年4月のシフトが自動生成されました', date: '4/13', color: 'green' },
-  { id: '3', message: '鈴木 花子さんの希望を登録しました', date: '4/10', color: 'blue' },
-  { id: '4', message: '新スタッフ「田中 一郎」を登録しました', date: '4/2', color: 'gray' },
-]
-
-const MOCK_NOTES: NoteItem[] = [
-  { name: '山田 太郎', date: '4月15日（火）', note: '私用のため' },
-  { name: '鈴木 花子', date: '4月20日（日）', note: '私用のため緊急不可' },
-  { name: '田中 一郎', date: '4月23日（水）', note: '—' },
-]
-
-// 直近3日モックシフト（Supabase接続後は実データに差し替え）
-const MOCK_DAY_SHIFTS: { 早: number; 日: number; 遅: number; 夜: number }[] = [
-  { 早: 1, 日: 2, 遅: 1, 夜: 1 },
-  { 早: 2, 日: 1, 遅: 1, 夜: 1 },
-  { 早: 1, 日: 3, 遅: 0, 夜: 1 },
-]
+interface ActivityItem {
+  id: string
+  message: string
+  date: string
+  color: 'rose' | 'green' | 'blue' | 'gray'
+}
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
 const SHIFT_BADGE: Record<string, string> = {
-  早: 'bg-sky-100 text-sky-700',
   日: 'text-gray-600',
-  遅: 'bg-orange-100 text-orange-700',
   夜: 'bg-violet-100 text-violet-700',
 }
 
@@ -82,41 +56,125 @@ const QUICK_ACTIONS = [
 ]
 
 export default function DashboardPage() {
-  const today = new Date(2025, 3, 15) // TODO: Supabase接続後は実際の日付に
-  const dayShifts: DayShift[] = MOCK_DAY_SHIFTS.map((s, i) => {
-    const d = addDays(today, i)
-    const dow = getDay(d)
-    return {
-      label: `${format(d, 'M/d')}（${DAY_LABELS[dow]}）`,
-      ...s,
+  const supabase = createClient()
+  const today = new Date()
+
+  const [staffCount, setStaffCount] = useState<number>(0)
+  const [leaveCount, setLeaveCount] = useState<number>(0)
+  const [notes, setNotes] = useState<NoteItem[]>([])
+  const [activities, setActivities] = useState<ActivityItem[]>([])
+  const [dayShifts, setDayShifts] = useState<DayShift[]>([])
+
+  useEffect(() => {
+    async function load() {
+      const yearMonth = format(today, 'yyyy-MM')
+      const monthStart = format(startOfMonth(today), 'yyyy-MM-dd')
+      const monthEnd = format(endOfMonth(today), 'yyyy-MM-dd')
+
+      const [
+        { count: sCount },
+        { data: leaveData },
+        { data: scheduleMonth },
+      ] = await Promise.all([
+        supabase.from('staff_profiles').select('id', { count: 'exact', head: true }).eq('is_active', true),
+        supabase
+          .from('leave_requests')
+          .select('id, date, note, type, staff:staff_profiles(name)')
+          .gte('date', monthStart)
+          .lte('date', monthEnd)
+          .order('date', { ascending: false }),
+        supabase.from('schedule_months').select('id').eq('year_month', yearMonth).single(),
+      ])
+
+      if (sCount !== null) setStaffCount(sCount)
+
+      if (leaveData) {
+        setLeaveCount(leaveData.length)
+
+        setNotes(
+          leaveData.slice(0, 5).map((r) => ({
+            name: (Array.isArray(r.staff) ? r.staff[0] : r.staff as { name: string } | null)?.name ?? '不明',
+            date: format(new Date(r.date), 'M月d日（E）', { locale: ja }),
+            note: r.note ?? r.type ?? '—',
+          }))
+        )
+
+        const colors: ActivityItem['color'][] = ['rose', 'blue', 'green', 'gray']
+        setActivities(
+          leaveData.slice(0, 4).map((r, i) => ({
+            id: r.id,
+            message: `${(Array.isArray(r.staff) ? r.staff[0] : r.staff as { name: string } | null)?.name ?? '不明'}さんの${r.type}を登録しました`,
+            date: format(new Date(r.date), 'M/d'),
+            color: colors[i % colors.length],
+          }))
+        )
+      }
+
+      if (scheduleMonth) {
+        const dates = [today, addDays(today, 1), addDays(today, 2)].map((d) =>
+          format(d, 'yyyy-MM-dd')
+        )
+        const { data: assignments } = await supabase
+          .from('shift_assignments')
+          .select('date, shift_code')
+          .eq('schedule_month_id', scheduleMonth.id)
+          .in('date', dates)
+
+        setDayShifts(
+          dates.map((dateStr, i) => {
+            const d = addDays(today, i)
+            const dayAssignments = assignments?.filter((a) => a.date === dateStr) ?? []
+            const count = (code: string) => dayAssignments.filter((a) => a.shift_code === code).length
+            return {
+              label: `${format(d, 'M/d')}（${DAY_LABELS[getDay(d)]}）`,
+              日: count('日'),
+              夜: count('夜'),
+            }
+          })
+        )
+      } else {
+        setDayShifts(
+          [0, 1, 2].map((i) => {
+            const d = addDays(today, i)
+            return {
+              label: `${format(d, 'M/d')}（${DAY_LABELS[getDay(d)]}）`,
+              日: 0, 夜: 0,
+            }
+          })
+        )
+      }
     }
-  })
+
+    load()
+  }, [])
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
-      {/* KPI カード（2枚） */}
+      {/* KPI カード */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* 今月のスタッフ数 */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 shrink-0">
             <Users className="h-6 w-6 text-rose-400" />
           </div>
           <div>
             <p className="text-xs text-gray-400">今月のスタッフ数</p>
-            <p className="text-3xl font-bold text-gray-900 leading-tight">5<span className="text-base font-normal text-gray-500 ml-1">人</span></p>
+            <p className="text-3xl font-bold text-gray-900 leading-tight">
+              {staffCount}<span className="text-base font-normal text-gray-500 ml-1">人</span>
+            </p>
             <p className="text-xs text-gray-400 mt-0.5">在籍中</p>
           </div>
         </div>
 
-        {/* 当月の申請数 */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 shrink-0">
             <FileText className="h-6 w-6 text-rose-400" />
           </div>
           <div>
             <p className="text-xs text-gray-400">当月の申請数</p>
-            <p className="text-3xl font-bold text-gray-900 leading-tight">3<span className="text-base font-normal text-gray-500 ml-1">件</span></p>
-            <p className="text-xs text-gray-400 mt-0.5">先月比 +1件</p>
+            <p className="text-3xl font-bold text-gray-900 leading-tight">
+              {leaveCount}<span className="text-base font-normal text-gray-500 ml-1">件</span>
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">今月の希望休・有給</p>
           </div>
         </div>
       </div>
@@ -136,7 +194,7 @@ export default function DashboardPage() {
                 {i === 0 ? '今日 ' : ''}{day.label}
               </p>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-                {(['早', '日', '遅', '夜'] as const).map((shift) => (
+                {(['日', '夜'] as const).map((shift) => (
                   <div key={shift} className="flex items-center gap-1">
                     <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${SHIFT_BADGE[shift]}`}>
                       {shift}
@@ -150,25 +208,27 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 中段: 直近のアクション + クイックアクション */}
+      {/* 直近のアクション + クイックアクション */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* 直近のアクション */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
           <h2 className="text-sm font-semibold text-gray-700">直近のアクション</h2>
-          <ul className="space-y-3">
-            {MOCK_ACTIVITIES.map((item) => (
-              <li key={item.id} className="flex items-start gap-3">
-                <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${ACTIVITY_DOT[item.color]}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-700 leading-snug">{item.message}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{item.date}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {activities.length === 0 ? (
+            <p className="text-sm text-gray-400 py-2">今月の申請はまだありません</p>
+          ) : (
+            <ul className="space-y-3">
+              {activities.map((item) => (
+                <li key={item.id} className="flex items-start gap-3">
+                  <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${ACTIVITY_DOT[item.color]}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 leading-snug">{item.message}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.date}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        {/* クイックアクション */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
           <h2 className="text-sm font-semibold text-gray-700">クイックアクション</h2>
           <div className="space-y-2">
@@ -200,22 +260,26 @@ export default function DashboardPage() {
             シフト編集で確認 →
           </Link>
         </div>
-        <table className="w-full text-sm">
-          <tbody className="divide-y divide-gray-100">
-            {MOCK_NOTES.map((n, i) => (
-              <tr key={i} className="hover:bg-rose-50/30 transition-colors">
-                <td className="py-2.5 pr-4 font-medium text-gray-800 whitespace-nowrap w-28">{n.name}</td>
-                <td className="py-2.5 pr-4 text-gray-500 whitespace-nowrap w-36">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-gray-300" />
-                    {n.date}
-                  </span>
-                </td>
-                <td className="py-2.5 text-gray-500">{n.note}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {notes.length === 0 ? (
+          <p className="text-sm text-gray-400 py-2">今月の希望休・申請はありません</p>
+        ) : (
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-100">
+              {notes.map((n, i) => (
+                <tr key={i} className="hover:bg-rose-50/30 transition-colors">
+                  <td className="py-2.5 pr-4 font-medium text-gray-800 whitespace-nowrap w-28">{n.name}</td>
+                  <td className="py-2.5 pr-4 text-gray-500 whitespace-nowrap w-36">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5 text-gray-300" />
+                      {n.date}
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-gray-500">{n.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { getDaysInMonth, getDay } from 'date-fns'
+import { getDaysInMonth, getDay, addMonths, startOfMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
 import { Plus } from 'lucide-react'
 import {
@@ -12,12 +12,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { StaffProfile, ShiftType, LeaveRequest, deriveWorkHoursType } from '@/types'
-import { MOCK_STAFF, MOCK_SHIFT_TYPES } from '@/lib/mock'
 import { LeaveRequestTable } from '@/components/features/leave-requests/LeaveRequestTable'
 import { LeaveRequestFormDialog } from '@/components/features/leave-requests/LeaveRequestFormDialog'
 import { DeleteConfirmDialog } from '@/components/features/staff/DeleteConfirmDialog'
+import { createClient } from '@/lib/supabase/client'
 
-type ShiftCode = '早' | '日' | '遅' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
+type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
 
 interface ShiftDef {
   code: ShiftCode
@@ -28,9 +28,7 @@ interface ShiftDef {
 }
 
 const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
-  早:  { code: '早',  label: '早番',   bg: 'bg-sky-200',     text: 'text-sky-800',    ampm: 'AM' },
   日:  { code: '日',  label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
-  遅:  { code: '遅',  label: '遅番',   bg: 'bg-orange-200',  text: 'text-orange-800', ampm: 'PM' },
   夜:  { code: '夜',  label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
   明:  { code: '明',  label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
   公:  { code: '公',  label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
@@ -39,27 +37,31 @@ const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
   希休: { code: '希休', label: '希望休', bg: 'bg-rose-200',   text: 'text-rose-700',   ampm: 'off' },
 }
 
-const SHIFT_OPTIONS: Exclude<ShiftCode, ''>[] = ['早', '日', '遅', '夜', '明', '公', '有', '他']
-
-
-const MOCK_LEAVE_REQUESTS: LeaveRequest[] = [
-  { id: 'lr-1', staff_id: 'st-1', date: '2025-04-15', type: '希望休', preferred_shift_type_id: null, note: null,    created_at: '', updated_at: '', staff: MOCK_STAFF[0] },
-  { id: 'lr-2', staff_id: 'st-2', date: '2025-04-20', type: '有給',   preferred_shift_type_id: null, note: '私用のため', created_at: '', updated_at: '', staff: MOCK_STAFF[1] },
-  { id: 'lr-3', staff_id: 'st-3', date: '2025-04-23', type: 'シフト希望', preferred_shift_type_id: 'sh-3', note: null, created_at: '', updated_at: '', staff: MOCK_STAFF[2], preferred_shift_type: MOCK_SHIFT_TYPES[2] },
-]
-
-let nextLeaveId = 100
+const SHIFT_OPTIONS: Exclude<ShiftCode, ''>[] = ['日', '夜', '明', '公', '有', '他']
 
 function makeDefaultShifts(daysInMonth: number): ShiftCode[] {
   return Array(daysInMonth).fill('日')
 }
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => {
-  const month = (i + 1).toString().padStart(2, '0')
-  return { value: `2025-${month}`, label: `2025年${i + 1}月` }
-})
+function generateMonths(): { value: string; label: string }[] {
+  const now = startOfMonth(new Date())
+  return Array.from({ length: 12 }, (_, i) => {
+    const d = addMonths(now, i - 3)
+    const year = d.getFullYear()
+    const month = d.getMonth() + 1
+    return {
+      value: `${year}-${String(month).padStart(2, '0')}`,
+      label: `${year}年${month}月`,
+    }
+  })
+}
+
+const MONTHS = generateMonths()
+const TODAY_MONTH = MONTHS[3].value
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
+const BATH_DAYS_KEY = 'shift-bath-days-dow'
+const DEFAULT_BATH_DAYS_DOW = [1, 4]
 
 function headerBg(dow: number, isHoliday: boolean) {
   if (dow === 0 || isHoliday) return 'bg-red-50'
@@ -98,23 +100,66 @@ interface EditCell {
   y: number
 }
 
-const BATH_DAYS_KEY = 'shift-bath-days-dow'
-const DEFAULT_BATH_DAYS_DOW = [1, 4]
-
 export default function ShiftEditPage() {
-  const [selectedMonth, setSelectedMonth] = useState('2025-04')
+  const supabase = createClient()
+
+  const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [shiftGrid, setShiftGrid] = useState<Record<string, ShiftCode[]>>({})
   const [bathSet, setBathSet] = useState<Set<number>>(new Set())
   const [editCell, setEditCell] = useState<EditCell | null>(null)
   const [confirmed, setConfirmed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [genWarnings, setGenWarnings] = useState<string[]>([])
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(MOCK_LEAVE_REQUESTS)
+  const [staffList, setStaffList] = useState<StaffProfile[]>([])
+  const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([])
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
   const [leaveFormOpen, setLeaveFormOpen] = useState(false)
   const [leaveEditTarget, setLeaveEditTarget] = useState<LeaveRequest | null>(null)
   const [leaveDeleteTarget, setLeaveDeleteTarget] = useState<LeaveRequest | null>(null)
   const [leaveCellPreset, setLeaveCellPreset] = useState<{ staff_id: string; date: string } | undefined>(undefined)
+
+  // マスタデータ読み込み
+  useEffect(() => {
+    async function loadMasters() {
+      const [{ data: staff }, { data: types }] = await Promise.all([
+        supabase.from('staff_profiles').select('*').eq('is_active', true).order('created_at'),
+        supabase.from('shift_types').select('*').eq('is_active', true).order('sort_order'),
+      ])
+      if (staff) setStaffList(staff)
+      if (types) setShiftTypes(types)
+    }
+    loadMasters()
+  }, [])
+
+  // お風呂の曜日をlocalStorageから読み込む
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(BATH_DAYS_KEY)
+      if (stored) setBathDaysDow(JSON.parse(stored))
+    } catch {}
+  }, [])
+
+  // 月変更時に希望休を読み込む
+  useEffect(() => {
+    async function loadLeaveRequests() {
+      const [year, month] = selectedMonth.split('-')
+      const from = `${year}-${month}-01`
+      const lastDay = getDaysInMonth(new Date(Number(year), Number(month) - 1))
+      const to = `${year}-${month}-${String(lastDay).padStart(2, '0')}`
+      const { data } = await supabase
+        .from('leave_requests')
+        .select('*, staff:staff_profiles(*), preferred_shift_type:shift_types(*)')
+        .gte('date', from)
+        .lte('date', to)
+        .order('date')
+      if (data) setLeaveRequests(data)
+    }
+    loadLeaveRequests()
+  }, [selectedMonth])
 
   const filteredLeaveRequests = useMemo(
     () => leaveRequests.filter((r) => r.date.startsWith(selectedMonth)),
@@ -151,41 +196,39 @@ export default function ShiftEditPage() {
     })
   }
 
-  function handleLeaveAdd(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
+  async function handleLeaveAdd(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
     if (leaveRequestMap.has(`${data.staff_id}:${data.date}`)) return
-    const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
-    const preferred_shift_type = MOCK_SHIFT_TYPES.find((st) => st.id === data.preferred_shift_type_id)
-    setLeaveRequests((prev) => [...prev, {
-      id: `lr-${nextLeaveId++}`,
-      ...data,
-      note: data.note || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      staff,
-      preferred_shift_type,
-    }])
-    applyLeaveToGrid(data.staff_id, data.date, data.type)
+    const { data: inserted } = await supabase
+      .from('leave_requests')
+      .insert({ ...data, note: data.note || null })
+      .select('*, staff:staff_profiles(*), preferred_shift_type:shift_types(*)')
+      .single()
+    if (inserted) {
+      setLeaveRequests((prev) => [...prev, inserted])
+      applyLeaveToGrid(data.staff_id, data.date, data.type)
+    }
     setLeaveFormOpen(false)
   }
 
-  function handleLeaveEdit(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
+  async function handleLeaveEdit(data: { staff_id: string; date: string; type: LeaveRequest['type']; preferred_shift_type_id: string | null; note: string }) {
     if (!leaveEditTarget) return
-    const staff = MOCK_STAFF.find((s) => s.id === data.staff_id)
-    const preferred_shift_type = MOCK_SHIFT_TYPES.find((st) => st.id === data.preferred_shift_type_id)
-    setLeaveRequests((prev) =>
-      prev.map((r) =>
-        r.id === leaveEditTarget.id
-          ? { ...r, ...data, note: data.note || null, updated_at: new Date().toISOString(), staff, preferred_shift_type }
-          : r
-      )
-    )
-    applyLeaveToGrid(data.staff_id, data.date, data.type)
+    const { data: updated } = await supabase
+      .from('leave_requests')
+      .update({ ...data, note: data.note || null, updated_at: new Date().toISOString() })
+      .eq('id', leaveEditTarget.id)
+      .select('*, staff:staff_profiles(*), preferred_shift_type:shift_types(*)')
+      .single()
+    if (updated) {
+      setLeaveRequests((prev) => prev.map((r) => r.id === leaveEditTarget.id ? updated : r))
+      applyLeaveToGrid(data.staff_id, data.date, data.type)
+    }
     setLeaveEditTarget(null)
     setLeaveFormOpen(false)
   }
 
-  function handleLeaveDelete() {
+  async function handleLeaveDelete() {
     if (!leaveDeleteTarget) return
+    await supabase.from('leave_requests').delete().eq('id', leaveDeleteTarget.id)
     setLeaveRequests((prev) => prev.filter((r) => r.id !== leaveDeleteTarget.id))
     const [year, month, day] = leaveDeleteTarget.date.split('-').map(Number)
     const [selYear, selMonth] = selectedMonth.split('-').map(Number)
@@ -200,14 +243,6 @@ export default function ShiftEditPage() {
     setLeaveDeleteTarget(null)
   }
 
-  // 勤務制約設定で保存されたお風呂の曜日を読み込む
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(BATH_DAYS_KEY)
-      if (stored) setBathDaysDow(JSON.parse(stored))
-    } catch {}
-  }, [])
-
   // 日付リスト
   const days = useMemo(() => {
     const [year, month] = selectedMonth.split('-').map(Number)
@@ -221,7 +256,7 @@ export default function ShiftEditPage() {
   // 月変更時にシフトとお風呂の日をリセット
   useEffect(() => {
     const newGrid: Record<string, ShiftCode[]> = {}
-    MOCK_STAFF.forEach((s) => {
+    staffList.forEach((s) => {
       newGrid[s.id] = makeDefaultShifts(days.length)
     })
     setShiftGrid(newGrid)
@@ -231,7 +266,7 @@ export default function ShiftEditPage() {
     }, [])))
     setEditCell(null)
     setConfirmed(false)
-  }, [days, bathDaysDow])
+  }, [days, bathDaysDow, staffList])
 
   // ポップオーバーの外クリックで閉じる
   useEffect(() => {
@@ -259,11 +294,9 @@ export default function ShiftEditPage() {
       const prevCode = row[dayIdx]
       row[dayIdx] = code
 
-      // 「夜」を選択 → 翌日を「明」に自動設定
       if (code === '夜' && dayIdx + 1 < row.length) {
         row[dayIdx + 1] = '明'
       }
-      // 「夜」から別のシフトに変更 → 翌日が「明」なら「日」に戻す
       if (prevCode === '夜' && code !== '夜' && dayIdx + 1 < row.length && row[dayIdx + 1] === '明') {
         row[dayIdx + 1] = '日'
       }
@@ -282,27 +315,70 @@ export default function ShiftEditPage() {
     })
   }
 
+  async function handleGenerate() {
+    setGenerating(true)
+    setGenWarnings([])
+    const res = await fetch('/api/shift/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year_month: selectedMonth }),
+    })
+    const json = await res.json()
+    if (!res.ok) {
+      setGenWarnings([json.error ?? '生成に失敗しました'])
+      setGenerating(false)
+      return
+    }
+    setShiftGrid(json.grid)
+    if (json.warnings?.length > 0) setGenWarnings(json.warnings)
+    setConfirmed(false)
+    setGenerating(false)
+  }
+
+  async function handleConfirm() {
+    setSaving(true)
+    const [year, month] = selectedMonth.split('-').map(Number)
+
+    const { data: scheduleMonth } = await supabase
+      .from('schedule_months')
+      .upsert({ year_month: selectedMonth, status: 'confirmed', confirmed_at: new Date().toISOString() }, { onConflict: 'year_month' })
+      .select()
+      .single()
+
+    if (scheduleMonth) {
+      const assignments = staffList.flatMap((staff) =>
+        (shiftGrid[staff.id] ?? []).map((code, i) => ({
+          schedule_month_id: scheduleMonth.id,
+          staff_id: staff.id,
+          date: `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`,
+          shift_type_id: null,
+          shift_code: code || '日',
+          is_bath_day: bathSet.has(i),
+        }))
+      )
+      await supabase.from('shift_assignments').upsert(assignments, { onConflict: 'schedule_month_id,staff_id,date' })
+    }
+
+    setConfirmed(true)
+    setSaving(false)
+  }
+
   // 日ごとの集計
   const dailyCounts = useMemo(() => {
     return days.map((_, i) => {
-      let am = 0, pm = 0, night = 0, off = 0
-      MOCK_STAFF.forEach((staff) => {
+      let day = 0, night = 0, off = 0
+      staffList.forEach((staff) => {
         const code = shiftGrid[staff.id]?.[i] ?? ''
         if (!code) { off++; return }
-        const def = SHIFT_DEF[code]
+        const def = SHIFT_DEF[code as Exclude<ShiftCode, ''>]
         if (!def) { off++; return }
         if (def.ampm === 'night') { night++; return }
         if (def.ampm === 'off') { off++; return }
-        if (def.ampm === 'AM') { am++; return }
-        if (def.ampm === 'PM') { pm++; return }
-        if (code === '日') {
-          if (deriveWorkHoursType(staff.work_start_time) === 'AM') am++
-          else pm++
-        }
+        day++
       })
-      return { am, pm, night, off }
+      return { day, night, off }
     })
-  }, [days, shiftGrid])
+  }, [days, shiftGrid, staffList])
 
   const currentCode = editCell ? (shiftGrid[editCell.staffId]?.[editCell.dayIdx] ?? '') : ''
 
@@ -333,21 +409,34 @@ export default function ShiftEditPage() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <button className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
-            この内容で作成する
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-50"
+          >
+            {generating ? '生成中...' : 'シフトを自動生成'}
           </button>
           <button
-            onClick={() => setConfirmed(true)}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            onClick={handleConfirm}
+            disabled={saving}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-60 ${
               confirmed
                 ? 'bg-green-500 text-white'
                 : 'bg-rose-500 hover:bg-rose-600 text-white'
             }`}
           >
-            {confirmed ? '確定済み' : '確定'}
+            {saving ? '保存中...' : confirmed ? '確定済み' : '確定'}
           </button>
         </div>
       </div>
+
+      {/* 生成警告 */}
+      {genWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
+          <p className="font-semibold">⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）</p>
+          {genWarnings.map((w, i) => <p key={i}>・{w}</p>)}
+        </div>
+      )}
 
       {/* テーブル本体 */}
       <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
@@ -392,7 +481,7 @@ export default function ShiftEditPage() {
             </tr>
           </thead>
           <tbody>
-            {MOCK_STAFF.map((staff, staffIdx) => {
+            {staffList.map((staff, staffIdx) => {
               const shifts = shiftGrid[staff.id] ?? []
               const nightCount = shifts.filter(s => s === '夜').length
               const offCount = shifts.filter(s => s === '公' || s === '有' || s === '希休').length
@@ -436,29 +525,17 @@ export default function ShiftEditPage() {
               )
             })}
 
-            {/* 日勤者AM */}
+            {/* 日勤者 */}
             <tr className="bg-emerald-50">
               <td className="sticky left-0 z-10 bg-emerald-50 px-2 py-1 text-gray-600 font-semibold border-t-2 border-t-emerald-300 border-b border-rose-100 whitespace-nowrap">
-                日勤者 AM
+                日勤者
               </td>
               {dailyCounts.map((c, i) => (
                 <td key={i} className={`text-center py-1 border-t-2 border-t-emerald-300 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
-                  {c.am || ''}
+                  {c.day || ''}
                 </td>
               ))}
               <td className="border-t-2 border-t-emerald-300 border-l border-rose-100" colSpan={3} />
-            </tr>
-            {/* 日勤者PM */}
-            <tr className="bg-orange-50/60">
-              <td className="sticky left-0 z-10 bg-orange-50/60 px-2 py-1 text-gray-600 font-semibold border-b border-rose-100 whitespace-nowrap">
-                日勤者 PM
-              </td>
-              {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
-                  {c.pm || ''}
-                </td>
-              ))}
-              <td className="border-b border-l border-rose-100" colSpan={3} />
             </tr>
             {/* 夜勤者 */}
             <tr className="bg-violet-50/60">
@@ -529,8 +606,8 @@ export default function ShiftEditPage() {
         onSubmit={leaveEditTarget ? handleLeaveEdit : handleLeaveAdd}
         initialData={leaveEditTarget}
         defaultValues={leaveCellPreset}
-        staffList={MOCK_STAFF}
-        shiftTypes={MOCK_SHIFT_TYPES}
+        staffList={staffList}
+        shiftTypes={shiftTypes}
       />
 
       <DeleteConfirmDialog

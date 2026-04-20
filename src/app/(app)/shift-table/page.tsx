@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { getDaysInMonth, getDay } from 'date-fns'
+import { getDaysInMonth, getDay, addMonths, startOfMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
 import {
   Select,
@@ -11,26 +11,20 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { StaffProfile, deriveWorkHoursType } from '@/types'
+import { createClient } from '@/lib/supabase/client'
 
-// ------
-// TODO: Supabase 接続後にここをサーバーサイドデータに差し替え
-// ------
-
-type ShiftCode = '早' | '日' | '遅' | '夜' | '明' | '公' | '有' | '他' | ''
+type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | ''
 
 interface ShiftDef {
   code: ShiftCode
   label: string
   bg: string
   text: string
-  /** AM/PM集計対象 */
   ampm: 'AM' | 'PM' | 'night' | 'off' | null
 }
 
 const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
-  早: { code: '早', label: '早番',   bg: 'bg-sky-200',     text: 'text-sky-800',    ampm: 'AM' },
-  日: { code: '日', label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null }, // work_hours_typeで分類
-  遅: { code: '遅', label: '遅番',   bg: 'bg-orange-200',  text: 'text-orange-800', ampm: 'PM' },
+  日: { code: '日', label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
   夜: { code: '夜', label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
   明: { code: '明', label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
   公: { code: '公', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
@@ -40,46 +34,30 @@ const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
 
 interface StaffRow {
   staff: StaffProfile
-  shifts: ShiftCode[]   // index 0 = 1日
-  nightCount: number    // 夜勤回数
-  offCount: number      // 休日数
-  carryOver: number     // 繰越
+  shifts: ShiftCode[]
+  nightCount: number
+  offCount: number
+  carryOver: number
 }
 
-const MOCK_STAFF: StaffProfile[] = [
-  { id: 'st-1', name: '武石 恵沙美', qualification: '正看護師', role: '師長', work_start_time: '08:30', work_end_time: '17:30', experience_years: 15, max_night_shifts: 2, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-2', name: '前川 さゆり', qualification: '正看護師', role: '主任', work_start_time: '08:30', work_end_time: '17:30', experience_years: 12, max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-3', name: '広瀬 澪楽',  qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 8,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-4', name: '堀 奈々美',  qualification: '正看護師', role: '一般', work_start_time: '08:30', work_end_time: '17:30', experience_years: 6,  max_night_shifts: 6, is_active: true, created_at: '', updated_at: '' },
-  { id: 'st-5', name: '伊藤 健二',  qualification: '准看護師', role: '一般', work_start_time: '13:00', work_end_time: '22:00', experience_years: 4,  max_night_shifts: 4, is_active: true, created_at: '', updated_at: '' },
-]
+function generateMonths(): { value: string; label: string }[] {
+  const now = startOfMonth(new Date())
+  return Array.from({ length: 12 }, (_, i) => {
+    const d = addMonths(now, i - 3)
+    const year = d.getFullYear()
+    const month = d.getMonth() + 1
+    return {
+      value: `${year}-${String(month).padStart(2, '0')}`,
+      label: `${year}年${month}月`,
+    }
+  })
+}
+
+const MONTHS = generateMonths()
+const TODAY_MONTH = MONTHS[3].value
 
 const BATH_DAYS_KEY = 'shift-bath-days-dow'
-const DEFAULT_BATH_DAYS_DOW = [1, 4] // 月=1, 木=4
-
-function makeMockShifts(daysInMonth: number, seed: number): ShiftCode[] {
-  const patterns: ShiftCode[][] = [
-    ['日','日','公','日','日','夜','明','公','日','日','公','日','夜','明','公','日','日','公','公','日','夜','明','公','日','日','公','日','日','公','公','日'],
-    ['早','公','日','早','公','早','夜','明','公','早','早','公','早','公','早','早','公','日','夜','明','公','早','公','早','早','公','早','早','公','早','公'],
-    ['夜','明','公','夜','明','公','日','夜','明','公','日','夜','明','公','日','夜','明','公','日','夜','明','公','日','公','遅','遅','公','日','日','公','遅'],
-    ['公','遅','遅','公','遅','遅','公','遅','公','遅','遅','公','遅','遅','公','公','遅','遅','公','遅','遅','公','遅','公','遅','公','遅','遅','公','遅','遅'],
-    ['日','日','日','公','日','日','公','公','早','早','日','日','公','日','日','公','日','早','早','公','日','日','公','早','早','公','日','日','公','日','有'],
-  ]
-  return patterns[seed % patterns.length].slice(0, daysInMonth)
-}
-
-function calcNightCount(shifts: ShiftCode[]) {
-  return shifts.filter((s) => s === '夜').length
-}
-function calcOffCount(shifts: ShiftCode[]) {
-  return shifts.filter((s) => s === '公' || s === '有').length
-}
-
-const MONTHS = Array.from({ length: 12 }, (_, i) => {
-  const month = (i + 1).toString().padStart(2, '0')
-  return { value: `2025-${month}`, label: `2025年${i + 1}月` }
-})
-
+const DEFAULT_BATH_DAYS_DOW = [1, 4]
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
 function headerBg(dow: number, isHoliday: boolean) {
@@ -113,10 +91,26 @@ function qualBadgeClass(s: StaffProfile) {
 }
 
 export default function ShiftTablePage() {
-  const [selectedMonth, setSelectedMonth] = useState('2025-04')
+  const supabase = createClient()
+  const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
+  const [staffList, setStaffList] = useState<StaffProfile[]>([])
+  const [shiftMap, setShiftMap] = useState<Record<string, ShiftCode>>({})
+  const [bathSet, setBathSet] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
 
-  // 勤務制約設定で保存されたお風呂の曜日を読み込む
+  useEffect(() => {
+    async function loadStaff() {
+      const { data } = await supabase
+        .from('staff_profiles')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at')
+      if (data) setStaffList(data)
+    }
+    loadStaff()
+  }, [])
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem(BATH_DAYS_KEY)
@@ -124,58 +118,88 @@ export default function ShiftTablePage() {
     } catch {}
   }, [])
 
+  useEffect(() => {
+    async function loadShifts() {
+      setLoading(true)
+      const { data: scheduleMonth } = await supabase
+        .from('schedule_months')
+        .select('id')
+        .eq('year_month', selectedMonth)
+        .single()
+
+      if (!scheduleMonth) {
+        setShiftMap({})
+        setBathSet(new Set())
+        setLoading(false)
+        return
+      }
+
+      const { data: assignments } = await supabase
+        .from('shift_assignments')
+        .select('staff_id, date, shift_code, is_bath_day')
+        .eq('schedule_month_id', scheduleMonth.id)
+
+      if (assignments) {
+        const map: Record<string, ShiftCode> = {}
+        const baths = new Set<string>()
+        assignments.forEach((a) => {
+          map[`${a.staff_id}:${a.date}`] = (a.shift_code as ShiftCode) ?? ''
+          if (a.is_bath_day) baths.add(a.date)
+        })
+        setShiftMap(map)
+        setBathSet(baths)
+      }
+      setLoading(false)
+    }
+    loadShifts()
+  }, [selectedMonth])
+
   const { days, rows } = useMemo(() => {
     const [year, month] = selectedMonth.split('-').map(Number)
     const daysInMonth = getDaysInMonth(new Date(year, month - 1))
     const days = Array.from({ length: daysInMonth }, (_, i) => {
       const date = new Date(year, month - 1, i + 1)
       const dow = getDay(date)
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`
       return {
         day: i + 1,
         dow,
-        isBath: bathDaysDow.includes(dow),
+        dateStr,
+        isBath: bathSet.has(dateStr) || bathDaysDow.includes(dow),
         isHoliday: HolidayJP.isHoliday(date),
       }
     })
-    const rows: StaffRow[] = MOCK_STAFF.map((staff, idx) => {
-      const shifts = makeMockShifts(daysInMonth, idx)
+    const rows: StaffRow[] = staffList.map((staff, idx) => {
+      const shifts = days.map((d) => shiftMap[`${staff.id}:${d.dateStr}`] ?? '')
       return {
         staff,
         shifts,
-        nightCount: calcNightCount(shifts),
-        offCount: calcOffCount(shifts),
+        nightCount: shifts.filter((s) => s === '夜').length,
+        offCount: shifts.filter((s) => s === '公' || s === '有').length,
         carryOver: idx === 0 ? 1 : 0,
       }
     })
     return { days, rows }
-  }, [selectedMonth, bathDaysDow])
+  }, [selectedMonth, staffList, shiftMap, bathSet, bathDaysDow])
 
-  // 日ごとの集計
   const dailyCounts = useMemo(() => {
     return days.map((_, i) => {
-      let am = 0, pm = 0, night = 0, off = 0
-      rows.forEach(({ staff, shifts }) => {
+      let day = 0, night = 0, off = 0
+      rows.forEach(({ shifts }) => {
         const code = shifts[i] ?? ''
         if (!code) { off++; return }
-        const def = code ? SHIFT_DEF[code] : null
+        const def = SHIFT_DEF[code as Exclude<ShiftCode, ''>]
         if (!def) { off++; return }
         if (def.ampm === 'night') { night++; return }
         if (def.ampm === 'off') { off++; return }
-        if (def.ampm === 'AM') { am++; return }
-        if (def.ampm === 'PM') { pm++; return }
-        // 日勤: work_start_time から AM/PM を導出
-        if (code === '日') {
-          if (deriveWorkHoursType(staff.work_start_time) === 'AM') am++
-          else pm++
-        }
+        day++
       })
-      return { am, pm, night, off }
+      return { day, night, off }
     })
   }, [days, rows])
 
   return (
     <div className="space-y-4 p-4">
-      {/* ヘッダー */}
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-gray-900">シフト表</h1>
@@ -189,6 +213,7 @@ export default function ShiftTablePage() {
               ))}
             </SelectContent>
           </Select>
+          {loading && <span className="text-xs text-gray-400">読み込み中...</span>}
         </div>
         <div className="flex items-center gap-2">
           <button className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
@@ -197,11 +222,9 @@ export default function ShiftTablePage() {
         </div>
       </div>
 
-      {/* テーブル本体 */}
       <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
         <table className="border-collapse text-xs w-full" style={{ minWidth: 'max-content' }}>
           <thead>
-            {/* お風呂の日ヘッダー */}
             <tr>
               <th className="sticky left-0 z-20 bg-white border-b border-rose-100 px-2 py-1 text-left text-[10px] text-gray-400 font-normal w-[120px] min-w-[120px] max-w-[120px]">
                 氏名/曜日
@@ -216,12 +239,10 @@ export default function ShiftTablePage() {
                   </div>
                 </th>
               ))}
-              {/* 右側集計列ヘッダー */}
               <th className="px-2 py-1 text-center border-b border-l border-rose-100 bg-rose-50 text-gray-500 font-semibold w-8">夜</th>
               <th className="px-2 py-1 text-center border-b border-l border-rose-100 bg-rose-50 text-gray-500 font-semibold w-8">休</th>
               <th className="px-2 py-1 text-center border-b border-l border-rose-100 bg-rose-50 text-gray-500 font-semibold w-8">繰</th>
             </tr>
-            {/* 日付・曜日ヘッダー */}
             <tr>
               <th className="sticky left-0 z-20 bg-rose-50 border-b border-rose-100 px-2 py-1" />
               {days.map(({ day, dow, isHoliday }) => (
@@ -230,9 +251,7 @@ export default function ShiftTablePage() {
                   className={`px-0 py-1 text-center border-b border-rose-100 ${headerBg(dow, isHoliday)}`}
                 >
                   <div className={`font-bold text-[11px] ${dayTextColor(dow, isHoliday)}`}>{day}</div>
-                  <div className={`text-[9px] ${dayTextColor(dow, isHoliday)}`}>
-                    {DAY_LABELS[dow]}
-                  </div>
+                  <div className={`text-[9px] ${dayTextColor(dow, isHoliday)}`}>{DAY_LABELS[dow]}</div>
                 </th>
               ))}
               <th className="border-b border-l border-rose-100 bg-rose-50" />
@@ -243,19 +262,16 @@ export default function ShiftTablePage() {
           <tbody>
             {rows.map(({ staff, shifts, nightCount, offCount, carryOver }, rowIdx) => (
               <tr key={staff.id} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}>
-                {/* 氏名（sticky） */}
                 <td className={`sticky left-0 z-10 px-2 py-1 border-b border-rose-100 whitespace-nowrap ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
                   <span className="font-medium text-gray-800">{staff.name}</span>
                   <span className={`ml-1 text-[10px] font-semibold ${qualBadgeClass(staff)}`}>
                     ({qualLabel(staff)})
                   </span>
                 </td>
-                {/* シフトセル */}
                 {days.map(({ day, dow, isHoliday }, i) => {
                   const code = shifts[i] ?? ''
                   const def = code ? SHIFT_DEF[code] : null
                   const nonWorkday = dow === 0 || dow === 6 || isHoliday
-                  // 平日の日勤は非表示
                   const showBadge = def && !(code === '日' && !nonWorkday)
                   return (
                     <td
@@ -272,38 +288,23 @@ export default function ShiftTablePage() {
                     </td>
                   )
                 })}
-                {/* 右側集計 */}
                 <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{nightCount}</td>
                 <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{offCount}</td>
                 <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{carryOver}</td>
               </tr>
             ))}
 
-            {/* 日勤者AM */}
             <tr className="bg-emerald-50">
               <td className="sticky left-0 z-10 bg-emerald-50 px-2 py-1 text-gray-600 font-semibold border-t-2 border-t-emerald-300 border-b border-rose-100 whitespace-nowrap">
-                日勤者 AM
+                日勤者
               </td>
               {dailyCounts.map((c, i) => (
                 <td key={i} className={`text-center py-1 border-t-2 border-t-emerald-300 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
-                  {c.am || ''}
+                  {c.day || ''}
                 </td>
               ))}
               <td className="border-t-2 border-t-emerald-300 border-l border-rose-100" colSpan={3} />
             </tr>
-            {/* 日勤者PM */}
-            <tr className="bg-orange-50/60">
-              <td className="sticky left-0 z-10 bg-orange-50/60 px-2 py-1 text-gray-600 font-semibold border-b border-rose-100 whitespace-nowrap">
-                日勤者 PM
-              </td>
-              {dailyCounts.map((c, i) => (
-                <td key={i} className={`text-center py-1 border-b border-gray-100 font-medium text-gray-700 ${cellBg(days[i].dow, days[i].isHoliday)}`}>
-                  {c.pm || ''}
-                </td>
-              ))}
-              <td className="border-b border-l border-rose-100" colSpan={3} />
-            </tr>
-            {/* 夜勤者 */}
             <tr className="bg-violet-50/60">
               <td className="sticky left-0 z-10 bg-violet-50/60 px-2 py-1 text-gray-600 font-semibold border-b border-rose-100 whitespace-nowrap">
                 夜勤者
@@ -315,7 +316,6 @@ export default function ShiftTablePage() {
               ))}
               <td className="border-b border-l border-rose-100" colSpan={3} />
             </tr>
-            {/* 非勤務者 */}
             <tr className="bg-gray-50">
               <td className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-gray-500 font-semibold whitespace-nowrap">
                 非勤務者
@@ -331,7 +331,6 @@ export default function ShiftTablePage() {
         </table>
       </div>
 
-      {/* 凡例 */}
       <div className="flex items-center gap-3 flex-wrap shrink-0 pb-1">
         {Object.values(SHIFT_DEF).map((s) => (
           <div key={s.code} className="flex items-center gap-1">
