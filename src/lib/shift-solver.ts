@@ -217,7 +217,8 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // ── Pass 3: Fill remaining with 日勤 or 公休 ────────────────────────────
   // Step A — 定休曜日・祝日を '公' で確定
   // Step B — offBudget を計算し残り空きスロットへ均等配置、残りは '日'
-  const OFF_CODES = new Set<ShiftCode>(['公', '有', '他', '希休', '明'])
+  // 明けは夜勤の構造的付随物なので off 予算にカウントしない
+  const OFF_CODES = new Set<ShiftCode>(['公', '有', '他', '希休'])
 
   staff.forEach((s) => {
     const offDow = new Set(s.off_days_of_week ?? [])
