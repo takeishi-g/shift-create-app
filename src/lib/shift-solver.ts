@@ -529,17 +529,23 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // ── Pass 6: Pair constraints ─────────────────────────────────────────────
   pairConstraints.forEach((pc) => {
     if (pc.constraint_type === 'must_not_pair') {
+      // 重なっていいのは日勤のみ: 夜・明 が絡む組み合わせはすべて違反
       const NIGHT_CODES = new Set<ShiftCode>(['夜', '明'])
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         const codeA = grid[pc.staff_id_a]?.[dayIdx]
         const codeB = grid[pc.staff_id_b]?.[dayIdx]
-        if (!codeA || !codeB) continue
-        const bothDay = codeA === '日' && codeB === '日'
-        const bothNight = NIGHT_CODES.has(codeA) && NIGHT_CODES.has(codeB)
-        if (!bothDay && !bothNight) continue
-        if (!grid[pc.staff_id_b]) continue
-        // 夜勤を解除する場合は日勤に（Pass 7 が孤立明けを公休に変換）、それ以外は公休
-        grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+        if (!codeA || !codeB || !grid[pc.staff_id_b]) continue
+        // 両者とも日勤のみ許容、それ以外で片方が夜/明なら違反
+        const aIsNight = NIGHT_CODES.has(codeA)
+        const bIsNight = NIGHT_CODES.has(codeB)
+        if (!aIsNight && !bIsNight) continue  // 夜/明 が絡まない → 問題なし
+        // 解消: 夜→日（Pass 7 が孤立明けを公休化）、明/公/有/他/希休→公
+        if (bIsNight) {
+          grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+        } else {
+          // B が公/有/他/希休 で A が夜/明 のケース: B を日勤にして夜勤者と分離
+          grid[pc.staff_id_b][dayIdx] = '日'
+        }
       }
     } else if (pc.constraint_type === 'must_pair') {
       let violations = 0
