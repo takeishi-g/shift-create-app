@@ -136,6 +136,24 @@ export default function ShiftEditPage() {
     loadMasters()
   }, [])
 
+  // 月変更時に target_off_days を取得（月別→デフォルトの順でフォールバック）
+  useEffect(() => {
+    async function loadTargetOffDays() {
+      const [{ data: monthly }, { data: fallback }] = await Promise.all([
+        supabase.from('shift_constraints').select('target_off_days').eq('year_month', selectedMonth).maybeSingle(),
+        supabase.from('shift_constraints').select('target_off_days').is('year_month', null).limit(1).maybeSingle(),
+      ])
+      const val = (monthly?.target_off_days ?? fallback?.target_off_days) as number | null | undefined
+      if (val != null) {
+        setTargetOffDays(val)
+      } else {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        setTargetOffDays(Math.round(getDaysInMonth(new Date(y, m - 1)) * 0.27))
+      }
+    }
+    loadTargetOffDays()
+  }, [selectedMonth])
+
   // お風呂の曜日をlocalStorageから読み込む
   useEffect(() => {
     try {
@@ -663,7 +681,7 @@ export default function ShiftEditPage() {
                   {/* 右側集計 */}
                   <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{nightCount}</td>
                   <td className={`text-center border-b border-l border-rose-100 font-medium px-1 ${Math.abs(offCount - targetOffDays) > 1 ? 'bg-red-100 text-red-600' : 'text-gray-700'}`}>{offCount}</td>
-                  <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{staffIdx === 0 ? 1 : 0}</td>
+                  <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{0}</td>
                 </tr>
               )
             })}
