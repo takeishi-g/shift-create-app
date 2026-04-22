@@ -56,6 +56,7 @@ export function generateShifts(input: SolverInput): SolverOutput {
 
   const minPerShift = (constraints?.min_staff_per_shift ?? {}) as Record<string, number>
   const minNight       = minPerShift['夜勤'] ?? 2
+  const minDay         = minPerShift['日勤'] ?? 3
   const minBathDay     = constraints?.min_staff_bath_day ?? 3
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
   const targetOffDays  = (constraints as Record<string, unknown> | null)?.['target_off_days'] as number | undefined
@@ -270,6 +271,55 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
+  // ── Pass 3.5: 平日の最低日勤人数確保 ────────────────────────────────────
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    const date35 = new Date(year, month - 1, dayIdx + 1)
+    const dow35 = date35.getDay()
+    if (dow35 === 0 || dow35 === 6 || HolidayJP.isHoliday(date35)) continue
+    let currentDay35 = staff.filter((s) => grid[s.id][dayIdx] === '日').length
+    if (currentDay35 >= minDay) continue
+
+    const candidates35 = staff
+      .filter((s) =>
+        grid[s.id][dayIdx] === '公' &&
+        (dayIdx === 0 || grid[s.id][dayIdx - 1] !== '明') &&
+        runLengthIfWorkAt(grid[s.id], dayIdx) <= maxConsecutive
+      )
+      .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
+
+    for (const s of candidates35) {
+      if (currentDay35 >= minDay) break
+      grid[s.id][dayIdx] = '日'
+      currentDay35++
+    }
+
+    if (currentDay35 < minDay) {
+      warnings.push(`${dayIdx + 1}日(平日): 日勤 最低${minDay}人に対し${currentDay35}人しか確保できません`)
+    }
+  }
+
+  // ── Pass 3.6: 土日祝の日勤人数を上限以下に抑制 ─────────────────────────
+  // min_staff_weekend を「土日祝の目標上限」として使用（超過分は公休に変換）
+  const maxWeekend = constraints?.min_staff_weekend ?? 2
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    const date36 = new Date(year, month - 1, dayIdx + 1)
+    const dow36 = date36.getDay()
+    if (dow36 !== 0 && dow36 !== 6 && !HolidayJP.isHoliday(date36)) continue
+    let currentDay36 = staff.filter((s) => grid[s.id][dayIdx] === '日').length
+    if (currentDay36 <= maxWeekend) continue
+
+    // 休日数が少ない（多く働いている）人から優先して公休に
+    const excess36 = staff
+      .filter((s) => grid[s.id][dayIdx] === '日')
+      .sort((a, b) => countVisibleOffs(grid[a.id]) - countVisibleOffs(grid[b.id]))
+
+    for (const s of excess36) {
+      if (currentDay36 <= maxWeekend) break
+      grid[s.id][dayIdx] = '公'
+      currentDay36--
+    }
+  }
+
   // ── Pass 4: お風呂の日の最低人数確保 ─────────────────────────────────
   function runLengthIfWorkAt(shifts: ShiftCode[], dayIdx: number): number {
     let prev = 0
@@ -337,6 +387,9 @@ export function generateShifts(input: SolverInput): SolverOutput {
       const date = new Date(year, month - 1, d + 1)
       const dow = date.getDay()
       if (dow === 0 || dow === 6 || HolidayJP.isHoliday(date)) continue
+      // 平日最低人数を割り込む日は除外
+      const dayCount45 = staff.filter((o) => grid[o.id][d] === '日').length
+      if (dayCount45 <= minDay) continue
       eligible.push(d)
     }
     const pickCount = Math.min(deficit, eligible.length)
@@ -357,13 +410,13 @@ export function generateShifts(input: SolverInput): SolverOutput {
     chosen.forEach((d) => { grid[s.id][d] = '公' })
   })
 
-  // ── Pass 4.6: 土日の最低人数確保 ─────────────────────────────────────
-  const minWeekend = constraints?.min_staff_weekend ?? 2
+  // ── Pass 4.6: 土日祝の最低人数確保（Pass 3.6 で減らしすぎた場合の安全網） ──
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const dow = new Date(year, month - 1, dayIdx + 1).getDay()
-    if (dow !== 0 && dow !== 6) continue
+    const date46 = new Date(year, month - 1, dayIdx + 1)
+    const dow = date46.getDay()
+    if (dow !== 0 && dow !== 6 && !HolidayJP.isHoliday(date46)) continue
     let currentDay = staff.filter((s) => grid[s.id][dayIdx] === '日').length
-    if (currentDay >= minWeekend) continue
+    if (currentDay >= maxWeekend) continue
 
     const candidates = staff
       .filter((s) =>
@@ -374,13 +427,13 @@ export function generateShifts(input: SolverInput): SolverOutput {
       .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
 
     for (const s of candidates) {
-      if (currentDay >= minWeekend) break
+      if (currentDay >= maxWeekend) break
       grid[s.id][dayIdx] = '日'
       currentDay++
     }
 
-    if (currentDay < minWeekend) {
-      warnings.push(`${dayIdx + 1}日(土日): 日勤 最低${minWeekend}人に対し${currentDay}人しか確保できません`)
+    if (currentDay < maxWeekend) {
+      warnings.push(`${dayIdx + 1}日(土日祝): 日勤 最低${maxWeekend}人に対し${currentDay}人しか確保できません`)
     }
   }
 
@@ -414,6 +467,9 @@ export function generateShifts(input: SolverInput): SolverOutput {
       const date = new Date(year, month - 1, d + 1)
       const dow = date.getDay()
       if (dow === 0 || dow === 6 || HolidayJP.isHoliday(date)) continue
+      // 平日最低人数を割り込む日は除外
+      const dayCount48 = staff.filter((o) => grid[o.id][d] === '日').length
+      if (dayCount48 <= minDay) continue
       eligible.push(d)
     }
     const pickCount = Math.min(deficit, eligible.length)
