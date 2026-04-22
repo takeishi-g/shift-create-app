@@ -402,6 +402,15 @@ export default function ShiftEditPage() {
     })
   }
 
+  function handleReset() {
+    const newGrid: Record<string, ShiftCode[]> = {}
+    staffList.forEach((s) => { newGrid[s.id] = makeDefaultShifts(days.length) })
+    setShiftGrid(newGrid)
+    setConfirmed(false)
+    setGenWarnings([])
+    try { localStorage.removeItem(sessionKey(selectedMonth)) } catch {}
+  }
+
   async function handleGenerate() {
     setGenerating(true)
     setGenWarnings([])
@@ -570,6 +579,12 @@ export default function ShiftEditPage() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleReset}
+            className="px-4 py-1.5 text-xs font-semibold text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            デフォルトに戻す
+          </button>
           <button
             onClick={handleGenerate}
             disabled={generating}
