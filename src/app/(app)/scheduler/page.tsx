@@ -62,6 +62,7 @@ const TODAY_MONTH = MONTHS[3].value
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 const BATH_DAYS_KEY = 'shift-bath-days-dow'
 const DEFAULT_BATH_DAYS_DOW = [1, 4]
+const sessionKey = (month: string) => `shift-session-${month}`
 
 function headerBg(dow: number, isHoliday: boolean) {
   if (dow === 0 || isHoliday) return 'bg-red-50'
@@ -127,7 +128,7 @@ export default function ShiftEditPage() {
     async function loadMasters() {
       const [{ data: staff }, { data: types }] = await Promise.all([
         supabase.from('staff_profiles').select('*').eq('is_active', true).order('created_at'),
-        supabase.from('shift_types').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('shift_types').select('*').order('display_order'),
       ])
       if (staff) setStaffList(staff)
       if (types) setShiftTypes(types)
@@ -182,13 +183,23 @@ export default function ShiftEditPage() {
     }
   }
 
-  function applyLeaveToGrid(staffId: string, date: string, type: LeaveRequest['type']) {
-    const code = leaveTypeToShiftCode(type)
-    if (!code) return
+  function applyLeaveToGrid(staffId: string, date: string, type: LeaveRequest['type'], isOvernight?: boolean) {
     const [year, month, day] = date.split('-').map(Number)
     const [selYear, selMonth] = selectedMonth.split('-').map(Number)
     if (year !== selYear || month !== selMonth) return
     const dayIdx = day - 1
+    if (type === 'シフト希望') {
+      if (!isOvernight) return
+      setShiftGrid(prev => {
+        const row = [...(prev[staffId] ?? [])]
+        row[dayIdx] = '夜'
+        if (dayIdx + 1 < row.length) row[dayIdx + 1] = '明'
+        return { ...prev, [staffId]: row }
+      })
+      return
+    }
+    const code = leaveTypeToShiftCode(type)
+    if (!code) return
     setShiftGrid(prev => {
       const row = [...(prev[staffId] ?? [])]
       row[dayIdx] = code
@@ -205,7 +216,7 @@ export default function ShiftEditPage() {
       .single()
     if (inserted) {
       setLeaveRequests((prev) => [...prev, inserted])
-      applyLeaveToGrid(data.staff_id, data.date, data.type)
+      applyLeaveToGrid(data.staff_id, data.date, data.type, inserted.preferred_shift_type?.is_overnight)
     }
     setLeaveFormOpen(false)
   }
@@ -220,7 +231,7 @@ export default function ShiftEditPage() {
       .single()
     if (updated) {
       setLeaveRequests((prev) => prev.map((r) => r.id === leaveEditTarget.id ? updated : r))
-      applyLeaveToGrid(data.staff_id, data.date, data.type)
+      applyLeaveToGrid(data.staff_id, data.date, data.type, updated.preferred_shift_type?.is_overnight)
     }
     setLeaveEditTarget(null)
     setLeaveFormOpen(false)
@@ -253,20 +264,78 @@ export default function ShiftEditPage() {
     })
   }, [selectedMonth])
 
-  // 月変更時にシフトとお風呂の日をリセット
+  // 月変更時: localStorage に保存済みセッションがあれば復元、なければ初期化
   useEffect(() => {
-    const newGrid: Record<string, ShiftCode[]> = {}
-    staffList.forEach((s) => {
-      newGrid[s.id] = makeDefaultShifts(days.length)
-    })
-    setShiftGrid(newGrid)
-    setBathSet(new Set(days.reduce<number[]>((acc, { dow }, i) => {
+    if (staffList.length === 0) return
+    const defaultBath = new Set(days.reduce<number[]>((acc, { dow }, i) => {
       if (bathDaysDow.includes(dow)) acc.push(i)
       return acc
-    }, [])))
+    }, []))
+    try {
+      const saved = localStorage.getItem(sessionKey(selectedMonth))
+      if (saved) {
+        const { grid: savedGrid, bathSet: savedBath } = JSON.parse(saved) as {
+          grid: Record<string, ShiftCode[]>
+          bathSet: number[]
+        }
+        const restored: Record<string, ShiftCode[]> = {}
+        staffList.forEach((s) => {
+          restored[s.id] = Array.isArray(savedGrid[s.id]) && savedGrid[s.id].length === days.length
+            ? savedGrid[s.id]
+            : makeDefaultShifts(days.length)
+        })
+        setShiftGrid(restored)
+        setBathSet(Array.isArray(savedBath) ? new Set(savedBath) : defaultBath)
+        setEditCell(null)
+        setConfirmed(false)
+        return
+      }
+    } catch {}
+    // 保存なし: デフォルト初期化
+    const newGrid: Record<string, ShiftCode[]> = {}
+    staffList.forEach((s) => { newGrid[s.id] = makeDefaultShifts(days.length) })
+    setShiftGrid(newGrid)
+    setBathSet(defaultBath)
     setEditCell(null)
     setConfirmed(false)
   }, [days, bathDaysDow, staffList])
+
+  // shiftGrid / bathSet の変更を localStorage に保存（空グリッドは除外）
+  useEffect(() => {
+    if (Object.keys(shiftGrid).length === 0) return
+    try {
+      localStorage.setItem(sessionKey(selectedMonth), JSON.stringify({
+        grid: shiftGrid,
+        bathSet: [...bathSet],
+      }))
+    } catch {}
+  }, [shiftGrid, bathSet, selectedMonth])
+
+  // leaveRequests が読み込まれたらグリッドへ反映（リロード・ページ遷移後対応）
+  useEffect(() => {
+    if (leaveRequests.length === 0) return
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
+    setShiftGrid((prev) => {
+      const next: Record<string, ShiftCode[]> = {}
+      Object.entries(prev).forEach(([id, shifts]) => { next[id] = [...shifts] })
+      leaveRequests.forEach((lr) => {
+        const [ly, lm, ld] = lr.date.split('-').map(Number)
+        if (ly !== selYear || lm !== selMonth) return
+        if (!next[lr.staff_id]) return
+        const dayIdx = ld - 1
+        if (lr.type === 'シフト希望') {
+          if (lr.preferred_shift_type?.is_overnight) {
+            next[lr.staff_id][dayIdx] = '夜'
+            if (dayIdx + 1 < next[lr.staff_id].length) next[lr.staff_id][dayIdx + 1] = '明'
+          }
+        } else {
+          const code = leaveTypeToShiftCode(lr.type)
+          if (code) next[lr.staff_id][dayIdx] = code
+        }
+      })
+      return next
+    })
+  }, [leaveRequests, selectedMonth])
 
   // ポップオーバーの外クリックで閉じる
   useEffect(() => {
@@ -318,10 +387,40 @@ export default function ShiftEditPage() {
   async function handleGenerate() {
     setGenerating(true)
     setGenWarnings([])
+
+    // 前月グリッドを localStorage から取得
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
+    const prevDate = new Date(selYear, selMonth - 2, 1)
+    const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
+    type TailEntry = { staff_id: string; shift_code: string; day: number }
+    const prevMonthTail: TailEntry[] = []
+    let prevGrid: Record<string, ShiftCode[]> | null = null
+    let prevLen = 0
+    try {
+      const saved = localStorage.getItem(sessionKey(prevMonthKey))
+      if (saved) {
+        const parsed = JSON.parse(saved) as { grid: Record<string, ShiftCode[]> }
+        prevGrid = parsed.grid
+        prevLen = Object.values(prevGrid)[0]?.length ?? 0
+        if (prevLen > 0) {
+          Object.entries(prevGrid).forEach(([staffId, shifts]) => {
+            const last = shifts[prevLen - 1]
+            const secondLast = shifts[prevLen - 2]
+            if (last) prevMonthTail.push({ staff_id: staffId, shift_code: last, day: prevLen })
+            if (secondLast) prevMonthTail.push({ staff_id: staffId, shift_code: secondLast, day: prevLen - 1 })
+          })
+        }
+      }
+    } catch {}
+
     const res = await fetch('/api/shift/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ year_month: selectedMonth }),
+      body: JSON.stringify({
+        year_month: selectedMonth,
+        bath_day_indices: [...bathSet],
+        prev_month_tail: prevMonthTail.length > 0 ? prevMonthTail : undefined,
+      }),
     })
     const json = await res.json()
     if (!res.ok) {
@@ -329,8 +428,34 @@ export default function ShiftEditPage() {
       setGenerating(false)
       return
     }
-    setShiftGrid(json.grid)
+
+    // API側で月跨ぎ処理されなかった場合のクライアント側フォールバック補正
+    let resultGrid = json.grid as Record<string, ShiftCode[]>
+    if (prevGrid && prevLen > 0) {
+      const corrected: Record<string, ShiftCode[]> = {}
+      Object.entries(resultGrid).forEach(([id, shifts]) => { corrected[id] = [...shifts] })
+      Object.entries(prevGrid).forEach(([staffId, shifts]) => {
+        if (!corrected[staffId]) return
+        const lastShift = shifts[prevLen - 1]
+        if (lastShift === '夜') {
+          // 前月末が夜勤 → 当月1日=明け、2日=公休（夜勤でない場合）
+          corrected[staffId][0] = '明'
+          if (corrected[staffId].length > 1 && corrected[staffId][1] !== '夜') {
+            corrected[staffId][1] = '公'
+          }
+        } else if (lastShift === '明') {
+          // 前月末が明け → 当月1日=公休（夜勤・明け以外なら上書き）
+          if (corrected[staffId][0] !== '夜' && corrected[staffId][0] !== '明') {
+            corrected[staffId][0] = '公'
+          }
+        }
+      })
+      resultGrid = corrected
+    }
+
+    setShiftGrid(resultGrid)
     if (json.warnings?.length > 0) setGenWarnings(json.warnings)
+    if (typeof json.targetOffDays === 'number') setTargetOffDays(json.targetOffDays)
     setConfirmed(false)
     setGenerating(false)
   }
@@ -339,29 +464,47 @@ export default function ShiftEditPage() {
     setSaving(true)
     const [year, month] = selectedMonth.split('-').map(Number)
 
-    const { data: scheduleMonth } = await supabase
+    const { data: scheduleMonth, error: smError } = await supabase
       .from('schedule_months')
-      .upsert({ year_month: selectedMonth, status: 'confirmed', confirmed_at: new Date().toISOString() }, { onConflict: 'year_month' })
+      .upsert(
+        { year, month, year_month: selectedMonth, status: 'confirmed', confirmed_at: new Date().toISOString() },
+        { onConflict: 'year,month' }
+      )
       .select()
       .single()
 
-    if (scheduleMonth) {
-      const assignments = staffList.flatMap((staff) =>
-        (shiftGrid[staff.id] ?? []).map((code, i) => ({
-          schedule_month_id: scheduleMonth.id,
-          staff_id: staff.id,
-          date: `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`,
-          shift_type_id: null,
-          shift_code: code || '日',
-          is_bath_day: bathSet.has(i),
-        }))
-      )
-      await supabase.from('shift_assignments').upsert(assignments, { onConflict: 'schedule_month_id,staff_id,date' })
+    if (smError || !scheduleMonth) {
+      setGenWarnings([`保存エラー: ${smError?.message ?? 'schedule_months の取得に失敗しました'}`])
+      setSaving(false)
+      return
+    }
+
+    const assignments = staffList.flatMap((staff) =>
+      (shiftGrid[staff.id] ?? []).map((code, i) => ({
+        schedule_month_id: scheduleMonth.id,
+        staff_id: staff.id,
+        date: `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`,
+        shift_type_id: null,
+        shift_code: code || '日',
+        is_bath_day: bathSet.has(i),
+      }))
+    )
+
+    const { error: saError } = await supabase
+      .from('shift_assignments')
+      .upsert(assignments, { onConflict: 'schedule_month_id,staff_id,date' })
+
+    if (saError) {
+      setGenWarnings([`保存エラー: ${saError.message}`])
+      setSaving(false)
+      return
     }
 
     setConfirmed(true)
     setSaving(false)
   }
+
+  const [targetOffDays, setTargetOffDays] = useState<number>(Math.round(30 * 0.27))
 
   // 日ごとの集計
   const dailyCounts = useMemo(() => {
@@ -484,7 +627,7 @@ export default function ShiftEditPage() {
             {staffList.map((staff, staffIdx) => {
               const shifts = shiftGrid[staff.id] ?? []
               const nightCount = shifts.filter(s => s === '夜').length
-              const offCount = shifts.filter(s => s === '公' || s === '有' || s === '希休').length
+              const offCount = shifts.filter(s => s === '公' || s === '有' || s === '他' || s === '希休').length
               return (
                 <tr key={staff.id} className={staffIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}>
                   {/* 氏名（sticky） */}
@@ -519,7 +662,7 @@ export default function ShiftEditPage() {
                   })}
                   {/* 右側集計 */}
                   <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{nightCount}</td>
-                  <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{offCount}</td>
+                  <td className={`text-center border-b border-l border-rose-100 font-medium px-1 ${Math.abs(offCount - targetOffDays) > 1 ? 'bg-red-100 text-red-600' : 'text-gray-700'}`}>{offCount}</td>
                   <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{staffIdx === 0 ? 1 : 0}</td>
                 </tr>
               )

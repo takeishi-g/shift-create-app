@@ -12,11 +12,14 @@ export interface SolverInput {
   leaveRequests: LeaveRequest[]
   pairConstraints: StaffPairConstraint[]
   bathDayIndices: number[]
+  /** 前月末2日分のシフト（月跨ぎ夜勤の持ち越し用） */
+  prevMonthTail?: { staff_id: string; shift_code: string; day: number }[]
 }
 
 export interface SolverOutput {
   grid: ShiftGrid
   warnings: string[]
+  targetOffDays: number
 }
 
 const WORK_CODES: ShiftCode[] = ['日', '夜']
@@ -45,7 +48,7 @@ function leaveTypeToCode(type: string): ShiftCode {
 }
 
 export function generateShifts(input: SolverInput): SolverOutput {
-  const { yearMonth, staff, constraints, leaveRequests, pairConstraints } = input
+  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, bathDayIndices, prevMonthTail } = input
   const warnings: string[] = []
 
   const [year, month] = yearMonth.split('-').map(Number)
@@ -53,13 +56,40 @@ export function generateShifts(input: SolverInput): SolverOutput {
 
   const minPerShift = (constraints?.min_staff_per_shift ?? {}) as Record<string, number>
   const minNight       = minPerShift['夜勤'] ?? 2
+  const minBathDay     = constraints?.min_staff_bath_day ?? 3
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
-  const autoInsertOff  = constraints?.auto_insert_off_after_night ?? true
   const targetOffDays  = (constraints as Record<string, unknown> | null)?.['target_off_days'] as number | undefined
     ?? Math.round(daysInMonth * 0.27)
 
+  // 目標休日数の計算には明を含めない（明は夜勤の構造的付随物で表示上の休日ではない）
+  const VISIBLE_OFF = new Set<ShiftCode>(['公', '有', '他', '希休'])
+  const countVisibleOffs = (shifts: ShiftCode[]) => shifts.filter((c) => VISIBLE_OFF.has(c)).length
+
   const grid: ShiftGrid = {}
   staff.forEach((s) => { grid[s.id] = Array(daysInMonth).fill('') as ShiftCode[] })
+
+  // ── Pass 0: 前月末夜勤の月跨ぎ持ち越し ───────────────────────────────────
+  // 前月最終日が夜勤 → 当月1日=明け、2日=公休
+  // 前月最終日が明け（前々日が夜勤）→ 当月1日=公休
+  if (prevMonthTail) {
+    const byStaff: Record<string, Record<number, string>> = {}
+    prevMonthTail.forEach(({ staff_id, shift_code, day }) => {
+      if (!byStaff[staff_id]) byStaff[staff_id] = {}
+      byStaff[staff_id][day] = shift_code
+    })
+    Object.entries(byStaff).forEach(([staffId, days]) => {
+      if (!grid[staffId]) return
+      const lastDay = Math.max(...Object.keys(days).map(Number))
+      const lastCode = days[lastDay]
+      const prevCode = days[lastDay - 1]
+      if (lastCode === '夜') {
+        grid[staffId][0] = '明'
+        if (daysInMonth > 1) grid[staffId][1] = '公'
+      } else if (lastCode === '明' || prevCode === '夜') {
+        grid[staffId][0] = '公'
+      }
+    })
+  }
 
   // ── Pass 1: Fixed assignments from leave requests ────────────────────────
   leaveRequests.forEach((lr) => {
@@ -67,20 +97,58 @@ export function generateShifts(input: SolverInput): SolverOutput {
     if (ly !== year || lm !== month) return
     const dayIdx = ld - 1
     if (dayIdx < 0 || dayIdx >= daysInMonth || !grid[lr.staff_id]) return
-    if (lr.type === 'シフト希望') return
+    if (lr.type === 'シフト希望') {
+      const preferred = (lr as unknown as { preferred_shift_type?: { name: string; is_overnight: boolean } }).preferred_shift_type
+      if (preferred?.is_overnight) {
+        grid[lr.staff_id][dayIdx] = '夜'
+        if (dayIdx + 1 < daysInMonth) grid[lr.staff_id][dayIdx + 1] = '明'
+      } else if (preferred) {
+        grid[lr.staff_id][dayIdx] = '日'
+      }
+      return
+    }
     const code = leaveTypeToCode(lr.type)
     if (code) grid[lr.staff_id][dayIdx] = code
   })
 
+  // ── Pass 1.5: 強制休（定休曜日・祝日）を事前に '公' で確定 ─────────────
+  // Pass 2（夜勤分散）よりも先に行うことで、定休日に夜勤が入るのを防ぐ
+  staff.forEach((s) => {
+    const offDow = new Set(s.off_days_of_week ?? [])
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      if (grid[s.id][dayIdx] !== '') continue
+      const date = new Date(year, month - 1, dayIdx + 1)
+      const dow = date.getDay()
+      const isHoliday = HolidayJP.isHoliday(date)
+      if (offDow.has(dow) || (s.off_on_holidays && isHoliday)) {
+        grid[s.id][dayIdx] = '公'
+      }
+    }
+  })
+
   // ── Pass 2: Night shift distribution (even spread) ──────────────────────
+  // Pass 1 で確定済みの夜勤を nightCount に反映してからカウント開始
   const nightCount: Record<string, number> = {}
-  staff.forEach((s) => { nightCount[s.id] = 0 })
+  staff.forEach((s) => { nightCount[s.id] = grid[s.id].filter((c) => c === '夜').length })
 
   function canAssignNight(shifts: ShiftCode[], dayIdx: number): boolean {
     if (shifts[dayIdx] !== '') return false
-    if (dayIdx > 0 && (shifts[dayIdx - 1] === '夜' || shifts[dayIdx - 1] === '明')) return false
-    if (consecutiveWorkEndingAt(shifts, dayIdx - 1) >= maxConsecutive) return false
+    // 直前が夜勤開始中（夜）なら不可（明けが入るべき位置）
+    if (dayIdx > 0 && shifts[dayIdx - 1] === '夜') return false
+    // 直前が明けの場合: 夜→明のパターンの続きのみ許可（2連続夜勤）
+    if (dayIdx > 0 && shifts[dayIdx - 1] === '明') {
+      if (dayIdx < 2 || shifts[dayIdx - 2] !== '夜') return false
+    }
+    // 翌日に明け以外が入っている場合は不可
     if (dayIdx + 1 < daysInMonth && shifts[dayIdx + 1] !== '' && shifts[dayIdx + 1] !== '明') return false
+    // 連続勤務上限チェック
+    if (consecutiveWorkEndingAt(shifts, dayIdx - 1) >= maxConsecutive) return false
+    // 夜勤連続2回まで: 夜→明→夜→明→夜（3連続）を阻止
+    if (dayIdx >= 4 &&
+        shifts[dayIdx - 1] === '明' &&
+        shifts[dayIdx - 2] === '夜' &&
+        shifts[dayIdx - 3] === '明' &&
+        shifts[dayIdx - 4] === '夜') return false
     return true
   }
 
@@ -88,103 +156,280 @@ export function generateShifts(input: SolverInput): SolverOutput {
     grid[s.id][dayIdx] = '夜'
     nightCount[s.id]++
     if (dayIdx + 1 < daysInMonth) grid[s.id][dayIdx + 1] = '明'
-    if (autoInsertOff && dayIdx + 2 < daysInMonth && grid[s.id][dayIdx + 2] === '') {
-      grid[s.id][dayIdx + 2] = '公'
+    // 明けの翌日は Pass 2.5 で一括確定するため autoInsert はしない
+  }
+
+  // Day-by-day greedy: 毎日 minNight 人に達するまで補充
+  //   - behindRatio = dayIdx/daysInMonth - nightCount/max で正規化（師長等も均等分散）
+  //   - max_night_shifts 以内を優先、足りない日のみ max 超過で補充（警告付き）
+  //   - max_night_shifts === 0 のスタッフは絶対に割り当てない（ハード制約）
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    const currentNight = staff.filter((s) => grid[s.id][dayIdx] === '夜').length
+    let needed = Math.max(0, minNight - currentNight)
+    if (needed === 0) continue
+
+    const eligibleStrict = staff
+      .filter((s) =>
+        s.max_night_shifts > 0 &&
+        nightCount[s.id] < s.max_night_shifts &&
+        canAssignNight(grid[s.id], dayIdx)
+      )
+      .sort((a, b) => {
+        const behindA = dayIdx / daysInMonth - nightCount[a.id] / a.max_night_shifts
+        const behindB = dayIdx / daysInMonth - nightCount[b.id] / b.max_night_shifts
+        if (Math.abs(behindA - behindB) > 0.01) return behindB - behindA
+        return countVisibleOffs(grid[a.id]) - countVisibleOffs(grid[b.id])
+      })
+
+    const toStrict = Math.min(needed, eligibleStrict.length)
+    for (let i = 0; i < toStrict; i++) assignNight(eligibleStrict[i], dayIdx)
+    needed -= toStrict
+
+    if (needed > 0) {
+      const eligibleRelaxed = staff
+        .filter((s) => s.max_night_shifts > 0 && canAssignNight(grid[s.id], dayIdx))
+        .sort((a, b) => (nightCount[a.id] - a.max_night_shifts) - (nightCount[b.id] - b.max_night_shifts))
+
+      const toRelaxed = Math.min(needed, eligibleRelaxed.length)
+      for (let i = 0; i < toRelaxed; i++) assignNight(eligibleRelaxed[i], dayIdx)
+      needed -= toRelaxed
+
+      if (toRelaxed > 0) {
+        warnings.push(`${dayIdx + 1}日: 最大夜勤回数を超過して${toRelaxed}人補充しました`)
+      }
+    }
+
+    if (needed > 0) {
+      warnings.push(`${dayIdx + 1}日: 夜勤 最低${minNight}人に対し${minNight - needed}人しか確保できません`)
     }
   }
 
-  // Phase A: 各スタッフの夜勤を月全体に均等分散
-  // target は max_night_shifts ではなく「最低人数を全員で分担した公平数」に抑える
-  // → Phase B が残りを補充できる余裕を確保する
-  const fairShare = Math.ceil((minNight * daysInMonth) / staff.length)
-  const sortedByNight = [...staff].sort((a, b) => b.max_night_shifts - a.max_night_shifts)
-  sortedByNight.forEach((s) => {
-    const target = Math.min(s.max_night_shifts, fairShare)
-    if (target === 0) return
-    const spacing = daysInMonth / target
-
-    for (let i = 0; i < target; i++) {
-      const ideal = Math.round(spacing * i + spacing / 2)
-      const searchRadius = Math.ceil(spacing / 2)
-      let assigned = false
-      for (let r = 0; r <= searchRadius && !assigned; r++) {
-        for (const offset of r === 0 ? [0] : [r, -r]) {
-          const dayIdx = ideal + offset
-          if (dayIdx < 0 || dayIdx >= daysInMonth) continue
-          if (!canAssignNight(grid[s.id], dayIdx)) continue
-          assignNight(s, dayIdx)
-          assigned = true
-          break
-        }
+  // ── Pass 2.5: 明けの翌日を公休に確定（ハード制約）────────────────────────
+  // 夜勤連続（夜→明→夜）の場合は翌日が既に夜なので上書きしない
+  staff.forEach((s) => {
+    for (let d = 0; d < daysInMonth - 1; d++) {
+      if (grid[s.id][d] === '明' && grid[s.id][d + 1] === '') {
+        grid[s.id][d + 1] = '公'
       }
     }
   })
 
-  // Phase B: 最低人数に満たない日を補充
-  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const currentNight = staff.filter((s) => grid[s.id][dayIdx] === '夜').length
-    const needed = Math.max(0, minNight - currentNight)
-    if (needed === 0) continue
-
-    const eligible = staff
-      .filter((s) => {
-        if (!canAssignNight(grid[s.id], dayIdx)) return false
-        if (nightCount[s.id] >= s.max_night_shifts) return false
-        return true
-      })
-      .sort((a, b) => nightCount[a.id] - nightCount[b.id])
-
-    const toAssign = Math.min(needed, eligible.length)
-    for (let i = 0; i < toAssign; i++) assignNight(eligible[i], dayIdx)
-
-    if (toAssign < needed) {
-      warnings.push(`${dayIdx + 1}日: 夜勤 最低${minNight}人に対し${currentNight + toAssign}人しか確保できません`)
-    }
-  }
-
   // ── Pass 3: Fill remaining with 日勤 or 公休 ────────────────────────────
+  // Step A — 定休曜日・祝日を '公' で確定
+  // Step B — offBudget を計算し残り空きスロットへ均等配置、残りは '日'
+  const OFF_CODES = new Set<ShiftCode>(['公', '有', '他', '希休', '明'])
+
   staff.forEach((s) => {
     const offDow = new Set(s.off_days_of_week ?? [])
 
-    // 明け含むすべての既存休日をカウント
-    const currentOff = grid[s.id].filter((c) => c === '公' || c === '有' || c === '他' || c === '希休' || c === '明').length
-
-    // 空きスロットのうち定休日に該当する日数を先読みしてoffBudgetから除く
-    // （定休日は休日数の一部として扱う）
-    const anticipatedForcedOff = grid[s.id].reduce((count, code, i) => {
-      if (code !== '') return count
-      const d = new Date(year, month - 1, i + 1)
-      return (offDow.has(d.getDay()) || (s.off_on_holidays && HolidayJP.isHoliday(d)))
-        ? count + 1
-        : count
-    }, 0)
-
-    let offBudget = Math.max(0, targetOffDays - currentOff - anticipatedForcedOff)
-
-    // 空きスロット全体に公休を均等配置（定休日スロットを除いた残りで計算）
-    const totalEmpty = grid[s.id].filter((c) => c === '').length - anticipatedForcedOff
-    const spacing = offBudget > 0 ? Math.max(1, Math.round(totalEmpty / offBudget) - 1) : Infinity
-    let emptySeenSinceLastOff = 0
-
+    // Step A: 強制休を先に確定
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (grid[s.id][dayIdx] !== '') continue
       const date = new Date(year, month - 1, dayIdx + 1)
       const dow = date.getDay()
-      const consec = consecutiveWorkEndingAt(grid[s.id], dayIdx - 1)
-
       const isHoliday = HolidayJP.isHoliday(date)
-      const forcedOff = offDow.has(dow) || (s.off_on_holidays && isHoliday)
-      const budgetOff = !forcedOff && offBudget > 0 && emptySeenSinceLastOff >= spacing
-
-      if (consec >= maxConsecutive || forcedOff || budgetOff) {
+      if (offDow.has(dow) || (s.off_on_holidays && isHoliday)) {
         grid[s.id][dayIdx] = '公'
-        emptySeenSinceLastOff = 0
-        if (budgetOff) offBudget--
-      } else {
-        grid[s.id][dayIdx] = '日'
-        emptySeenSinceLastOff++
       }
     }
+
+    // Step B: offBudget を計算し、残りの空きスロットへ均等配置
+    const totalOffs = grid[s.id].filter((c) => OFF_CODES.has(c)).length
+    const offBudget = Math.max(0, targetOffDays - totalOffs)
+
+    const emptyIndices: number[] = []
+    for (let i = 0; i < daysInMonth; i++) {
+      if (grid[s.id][i] === '') emptyIndices.push(i)
+    }
+
+    const offPositions = new Set<number>()
+    const pickCount = Math.min(offBudget, emptyIndices.length)
+    for (let k = 0; k < pickCount; k++) {
+      const raw = Math.round(((k + 0.5) * emptyIndices.length) / pickCount)
+      const clamped = Math.max(0, Math.min(emptyIndices.length - 1, raw))
+      offPositions.add(emptyIndices[clamped])
+    }
+    let remaining = pickCount - offPositions.size
+    for (const idx of emptyIndices) {
+      if (remaining <= 0) break
+      if (!offPositions.has(idx)) {
+        offPositions.add(idx)
+        remaining--
+      }
+    }
+
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      if (grid[s.id][dayIdx] !== '') continue
+      const consec = consecutiveWorkEndingAt(grid[s.id], dayIdx - 1)
+      if (offPositions.has(dayIdx) || consec >= maxConsecutive) {
+        grid[s.id][dayIdx] = '公'
+      } else {
+        grid[s.id][dayIdx] = '日'
+      }
+    }
+  })
+
+  // ── Pass 4: お風呂の日の最低人数確保 ─────────────────────────────────
+  function runLengthIfWorkAt(shifts: ShiftCode[], dayIdx: number): number {
+    let prev = 0
+    for (let i = dayIdx - 1; i >= 0 && isWork(shifts[i]); i--) prev++
+    let next = 0
+    for (let i = dayIdx + 1; i < daysInMonth && isWork(shifts[i]); i++) next++
+    return prev + 1 + next
+  }
+
+  const bathSwapCount: Record<string, number> = {}
+  staff.forEach((s) => { bathSwapCount[s.id] = 0 })
+
+  function eligibleForBathSwap(s: StaffProfile, dayIdx: number): boolean {
+    if (grid[s.id][dayIdx] !== '公') return false
+    if (dayIdx > 0 && grid[s.id][dayIdx - 1] === '明') return false  // 明け翌日は厳禁
+    return runLengthIfWorkAt(grid[s.id], dayIdx) <= maxConsecutive
+  }
+
+  for (const dayIdx of bathDayIndices) {
+    let currentDay = staff.filter((s) => grid[s.id][dayIdx] === '日').length
+    if (currentDay >= minBathDay) continue
+
+    const overTarget = staff
+      .filter((s) => eligibleForBathSwap(s, dayIdx))
+      .filter((s) => countVisibleOffs(grid[s.id]) > targetOffDays)
+      .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
+
+    for (const s of overTarget) {
+      if (currentDay >= minBathDay) break
+      grid[s.id][dayIdx] = '日'
+      bathSwapCount[s.id]++
+      currentDay++
+    }
+
+    if (currentDay >= minBathDay) continue
+
+    const fairRotation = staff
+      .filter((s) => eligibleForBathSwap(s, dayIdx))
+      .sort((a, b) => {
+        if (bathSwapCount[a.id] !== bathSwapCount[b.id]) return bathSwapCount[a.id] - bathSwapCount[b.id]
+        return countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id])
+      })
+
+    for (const s of fairRotation) {
+      if (currentDay >= minBathDay) break
+      grid[s.id][dayIdx] = '日'
+      bathSwapCount[s.id]++
+      currentDay++
+    }
+
+    if (currentDay < minBathDay) {
+      warnings.push(`${dayIdx + 1}日(お風呂): 日勤 最低${minBathDay}人に対し${currentDay}人しか確保できません`)
+    }
+  }
+
+  // ── Pass 4.5: Pass 4 で swap されて target を下回ったスタッフを補填 ────
+  const bathDaySet = new Set(bathDayIndices)
+  staff.forEach((s, staffIdx) => {
+    const deficit = targetOffDays - countVisibleOffs(grid[s.id])
+    if (deficit <= 0) return
+
+    const eligible: number[] = []
+    for (let d = 0; d < daysInMonth; d++) {
+      if (grid[s.id][d] !== '日' || bathDaySet.has(d)) continue
+      const date = new Date(year, month - 1, d + 1)
+      const dow = date.getDay()
+      if (dow === 0 || dow === 6 || HolidayJP.isHoliday(date)) continue
+      eligible.push(d)
+    }
+    const pickCount = Math.min(deficit, eligible.length)
+    if (pickCount === 0) return
+
+    const chunkSize = eligible.length / pickCount
+    const offset = staffIdx % Math.max(1, Math.round(chunkSize))
+    const chosen = new Set<number>()
+    for (let k = 0; k < pickCount; k++) {
+      const raw = Math.round(k * chunkSize + offset)
+      chosen.add(eligible[Math.max(0, Math.min(eligible.length - 1, raw))])
+    }
+    let remaining = pickCount - chosen.size
+    for (const d of eligible) {
+      if (remaining <= 0) break
+      if (!chosen.has(d)) { chosen.add(d); remaining-- }
+    }
+    chosen.forEach((d) => { grid[s.id][d] = '公' })
+  })
+
+  // ── Pass 4.6: 土日の最低人数確保 ─────────────────────────────────────
+  const minWeekend = constraints?.min_staff_weekend ?? 2
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    const dow = new Date(year, month - 1, dayIdx + 1).getDay()
+    if (dow !== 0 && dow !== 6) continue
+    let currentDay = staff.filter((s) => grid[s.id][dayIdx] === '日').length
+    if (currentDay >= minWeekend) continue
+
+    const candidates = staff
+      .filter((s) =>
+        grid[s.id][dayIdx] === '公' &&
+        (dayIdx === 0 || grid[s.id][dayIdx - 1] !== '明') &&
+        runLengthIfWorkAt(grid[s.id], dayIdx) <= maxConsecutive
+      )
+      .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
+
+    for (const s of candidates) {
+      if (currentDay >= minWeekend) break
+      grid[s.id][dayIdx] = '日'
+      currentDay++
+    }
+
+    if (currentDay < minWeekend) {
+      warnings.push(`${dayIdx + 1}日(土日): 日勤 最低${minWeekend}人に対し${currentDay}人しか確保できません`)
+    }
+  }
+
+  // ── Pass 4.7: 日勤 0 人の日を安全網として修正 ─────────────────────────
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    if (staff.some((s) => grid[s.id][dayIdx] === '日')) continue
+
+    const candidates = staff
+      .filter((s) =>
+        grid[s.id][dayIdx] === '公' &&
+        (dayIdx === 0 || grid[s.id][dayIdx - 1] !== '明') &&
+        runLengthIfWorkAt(grid[s.id], dayIdx) <= maxConsecutive
+      )
+      .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
+
+    if (candidates.length > 0) {
+      grid[candidates[0].id][dayIdx] = '日'
+    } else {
+      warnings.push(`${dayIdx + 1}日: 日勤スタッフを確保できませんでした`)
+    }
+  }
+
+  // ── Pass 4.8: 最終 off 数補填（Pass 4.6/4.7 の公→日 swap 後の不足を回収） ─
+  // 土日祝・お風呂の日は除外（Pass 4.6 の成果を打ち消さないため）
+  staff.forEach((s, staffIdx) => {
+    const deficit = targetOffDays - countVisibleOffs(grid[s.id])
+    if (deficit <= 0) return
+    const eligible: number[] = []
+    for (let d = 0; d < daysInMonth; d++) {
+      if (grid[s.id][d] !== '日' || bathDaySet.has(d)) continue
+      const date = new Date(year, month - 1, d + 1)
+      const dow = date.getDay()
+      if (dow === 0 || dow === 6 || HolidayJP.isHoliday(date)) continue
+      eligible.push(d)
+    }
+    const pickCount = Math.min(deficit, eligible.length)
+    if (pickCount === 0) return
+    const chunkSize = eligible.length / pickCount
+    const offset = staffIdx % Math.max(1, Math.round(chunkSize))
+    const chosen = new Set<number>()
+    for (let k = 0; k < pickCount; k++) {
+      const raw = Math.round(k * chunkSize + offset)
+      chosen.add(eligible[Math.max(0, Math.min(eligible.length - 1, raw))])
+    }
+    let rem = pickCount - chosen.size
+    for (const d of eligible) {
+      if (rem <= 0) break
+      if (!chosen.has(d)) { chosen.add(d); rem-- }
+    }
+    chosen.forEach((d) => { grid[s.id][d] = '公' })
   })
 
   // ── Pass 5: Fix consecutive work violations ──────────────────────────────
@@ -234,5 +479,13 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
-  return { grid, warnings }
+  // 休日数ズレ警告（目標 ±1 以上は警告）
+  staff.forEach((s) => {
+    const offs = countVisibleOffs(grid[s.id])
+    const diff = offs - targetOffDays
+    if (diff < -1) warnings.push(`${s.name}: 休日数 ${offs}日（目標 ${targetOffDays}日・${Math.abs(diff)}日不足）`)
+    else if (diff > 1) warnings.push(`${s.name}: 休日数 ${offs}日（目標 ${targetOffDays}日・${diff}日超過）`)
+  })
+
+  return { grid, warnings, targetOffDays }
 }

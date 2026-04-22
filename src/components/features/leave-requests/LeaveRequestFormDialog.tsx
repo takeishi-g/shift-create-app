@@ -83,7 +83,7 @@ export function LeaveRequestFormDialog({
     })
   }
 
-  const nightShiftTypes = shiftTypes.filter((st) => !st.is_off)
+  const nightShiftTypes = shiftTypes.filter((st) => !st.is_off && !['早番', '遅番'].includes(st.name))
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -153,7 +153,9 @@ export function LeaveRequestFormDialog({
                 onValueChange={(v) => v && setForm({ ...form, preferred_shift_type_id: v })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="シフトを選択" />
+                  <span className={form.preferred_shift_type_id ? '' : 'text-gray-400'}>
+                    {nightShiftTypes.find((st) => st.id === form.preferred_shift_type_id)?.name ?? 'シフトを選択'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {nightShiftTypes.map((st) => (
