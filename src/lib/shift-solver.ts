@@ -132,6 +132,26 @@ export function generateShifts(input: SolverInput): SolverOutput {
   const nightCount: Record<string, number> = {}
   staff.forEach((s) => { nightCount[s.id] = grid[s.id].filter((c) => c === '夜').length })
 
+  // ペア禁止制約ルックアップ（夜勤割り当て時に事前チェック）
+  const mustNotPairWith = new Map<string, Set<string>>()
+  pairConstraints.forEach((pc) => {
+    if (pc.constraint_type !== 'must_not_pair') return
+    if (!mustNotPairWith.has(pc.staff_id_a)) mustNotPairWith.set(pc.staff_id_a, new Set())
+    if (!mustNotPairWith.has(pc.staff_id_b)) mustNotPairWith.set(pc.staff_id_b, new Set())
+    mustNotPairWith.get(pc.staff_id_a)!.add(pc.staff_id_b)
+    mustNotPairWith.get(pc.staff_id_b)!.add(pc.staff_id_a)
+  })
+
+  // パートナーがすでに夜勤割り当て済みでないか確認
+  function nightPairOk(staffId: string, dayIdx: number): boolean {
+    const partners = mustNotPairWith.get(staffId)
+    if (!partners) return true
+    for (const pid of partners) {
+      if (grid[pid]?.[dayIdx] === '夜') return false
+    }
+    return true
+  }
+
   function canAssignNight(shifts: ShiftCode[], dayIdx: number): boolean {
     if (shifts[dayIdx] !== '') return false
     // 直前が夜勤開始中（夜）なら不可（明けが入るべき位置）
@@ -173,7 +193,8 @@ export function generateShifts(input: SolverInput): SolverOutput {
       .filter((s) =>
         s.max_night_shifts > 0 &&
         nightCount[s.id] < s.max_night_shifts &&
-        canAssignNight(grid[s.id], dayIdx)
+        canAssignNight(grid[s.id], dayIdx) &&
+        nightPairOk(s.id, dayIdx)
       )
       .sort((a, b) => {
         const behindA = dayIdx / daysInMonth - nightCount[a.id] / a.max_night_shifts
@@ -188,7 +209,7 @@ export function generateShifts(input: SolverInput): SolverOutput {
 
     if (needed > 0) {
       const eligibleRelaxed = staff
-        .filter((s) => s.max_night_shifts > 0 && canAssignNight(grid[s.id], dayIdx))
+        .filter((s) => s.max_night_shifts > 0 && canAssignNight(grid[s.id], dayIdx) && nightPairOk(s.id, dayIdx))
         .sort((a, b) => (nightCount[a.id] - a.max_night_shifts) - (nightCount[b.id] - b.max_night_shifts))
 
       const toRelaxed = Math.min(needed, eligibleRelaxed.length)
