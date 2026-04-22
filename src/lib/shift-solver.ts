@@ -529,11 +529,17 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // ── Pass 6: Pair constraints ─────────────────────────────────────────────
   pairConstraints.forEach((pc) => {
     if (pc.constraint_type === 'must_not_pair') {
+      const NIGHT_CODES = new Set<ShiftCode>(['夜', '明'])
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         const codeA = grid[pc.staff_id_a]?.[dayIdx]
         const codeB = grid[pc.staff_id_b]?.[dayIdx]
-        if (!codeA || !codeB || codeA !== codeB || !isWork(codeA)) continue
-        if (grid[pc.staff_id_b]) grid[pc.staff_id_b][dayIdx] = '日'
+        if (!codeA || !codeB) continue
+        const bothDay = codeA === '日' && codeB === '日'
+        const bothNight = NIGHT_CODES.has(codeA) && NIGHT_CODES.has(codeB)
+        if (!bothDay && !bothNight) continue
+        if (!grid[pc.staff_id_b]) continue
+        // 夜勤を解除する場合は日勤に（Pass 7 が孤立明けを公休に変換）、それ以外は公休
+        grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
       }
     } else if (pc.constraint_type === 'must_pair') {
       let violations = 0
