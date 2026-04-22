@@ -529,21 +529,26 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // ── Pass 6: Pair constraints ─────────────────────────────────────────────
   pairConstraints.forEach((pc) => {
     if (pc.constraint_type === 'must_not_pair') {
-      // 重なっていいのは日勤のみ: 夜・明 が絡む組み合わせはすべて違反
+      // 重なっていいのは日勤のみ
       const NIGHT_CODES = new Set<ShiftCode>(['夜', '明'])
+      const OFF_CODES   = new Set<ShiftCode>(['公', '有', '他', '希休'])
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         const codeA = grid[pc.staff_id_a]?.[dayIdx]
         const codeB = grid[pc.staff_id_b]?.[dayIdx]
         if (!codeA || !codeB || !grid[pc.staff_id_b]) continue
-        // 両者とも日勤のみ許容、それ以外で片方が夜/明なら違反
+        // 両者とも日勤 → 許容
+        if (codeA === '日' && codeB === '日') continue
         const aIsNight = NIGHT_CODES.has(codeA)
         const bIsNight = NIGHT_CODES.has(codeB)
-        if (!aIsNight && !bIsNight) continue  // 夜/明 が絡まない → 問題なし
-        // 解消: 夜→日（Pass 7 が孤立明けを公休化）、明/公/有/他/希休→公
+        const aIsOff   = OFF_CODES.has(codeA)
+        const bIsOff   = OFF_CODES.has(codeB)
+        // 違反条件: 夜/明 が絡む、または両者が同じ休日コード
+        const violation = aIsNight || bIsNight || (aIsOff && bIsOff && codeA === codeB)
+        if (!violation) continue
+        // 解消: B の夜→日（Pass 7 が孤立明けを公休化）、明/休→公、休どうし→日
         if (bIsNight) {
           grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
         } else {
-          // B が公/有/他/希休 で A が夜/明 のケース: B を日勤にして夜勤者と分離
           grid[pc.staff_id_b][dayIdx] = '日'
         }
       }
