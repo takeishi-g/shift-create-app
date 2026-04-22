@@ -320,6 +320,29 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   }
 
+  // ── Pass 3.7: 休日過多のスタッフの平日公休を日勤に変換 ─────────────────
+  // Pass 3.6 で土日祝の公休が増えた分を平日の日勤で吸収する
+  staff.forEach((s) => {
+    let excess37 = countVisibleOffs(grid[s.id]) - targetOffDays
+    if (excess37 <= 0) return
+
+    const offDow37 = new Set(s.off_days_of_week ?? [])
+    for (let d = 0; d < daysInMonth; d++) {
+      if (excess37 <= 0) break
+      if (grid[s.id][d] !== '公') continue
+      const date37 = new Date(year, month - 1, d + 1)
+      const dow37 = date37.getDay()
+      // 土日祝・定休曜日・明け翌日は除外
+      if (dow37 === 0 || dow37 === 6 || HolidayJP.isHoliday(date37)) continue
+      if (offDow37.has(dow37)) continue
+      if (s.off_on_holidays && HolidayJP.isHoliday(date37)) continue
+      if (d > 0 && grid[s.id][d - 1] === '明') continue
+      if (runLengthIfWorkAt(grid[s.id], d) > maxConsecutive) continue
+      grid[s.id][d] = '日'
+      excess37--
+    }
+  })
+
   // ── Pass 4: お風呂の日の最低人数確保 ─────────────────────────────────
   function runLengthIfWorkAt(shifts: ShiftCode[], dayIdx: number): number {
     let prev = 0
