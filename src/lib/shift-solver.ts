@@ -586,6 +586,50 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
+  // ── Pass 6.5: 夜勤不足スタッフへの修復割り当て ──────────────────────────
+  // Pass 6 でペア制約解消のため夜勤を削られたスタッフに夜勤を再割り当てする
+  staff.forEach((s) => {
+    if (s.max_night_shifts <= 0) return
+    let deficit = s.max_night_shifts - nightCount[s.id]
+    if (deficit <= 0) return
+
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      if (deficit <= 0) break
+      if (grid[s.id][dayIdx] !== '日') continue
+
+      // 前日が夜/明なら不可
+      if (dayIdx > 0 && (grid[s.id][dayIdx - 1] === '夜' || grid[s.id][dayIdx - 1] === '明')) continue
+
+      // 翌日が '日' か '公' でなければ不可（'明' に変換するため）
+      if (dayIdx + 1 >= daysInMonth) continue
+      const nextCode = grid[s.id][dayIdx + 1]
+      if (nextCode !== '日' && nextCode !== '公') continue
+
+      // 翌々日が '日' か '公' か範囲外でなければ不可（明け後=公休にするため）
+      if (dayIdx + 2 < daysInMonth) {
+        const nextNext = grid[s.id][dayIdx + 2]
+        if (nextNext !== '日' && nextNext !== '公') continue
+      }
+
+      // 3連続夜勤チェック
+      if (dayIdx >= 4 &&
+          grid[s.id][dayIdx - 1] === '明' &&
+          grid[s.id][dayIdx - 2] === '夜' &&
+          grid[s.id][dayIdx - 3] === '明' &&
+          grid[s.id][dayIdx - 4] === '夜') continue
+
+      // ペア禁止チェック
+      if (!nightPairOk(s.id, dayIdx)) continue
+
+      // 割り当て実行
+      grid[s.id][dayIdx] = '夜'
+      nightCount[s.id]++
+      deficit--
+      grid[s.id][dayIdx + 1] = '明'
+      if (dayIdx + 2 < daysInMonth) grid[s.id][dayIdx + 2] = '公'
+    }
+  })
+
   // ── Pass 7: Remove orphan 明 (明 not preceded by 夜) ───────────────────
   staff.forEach((s) => {
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
