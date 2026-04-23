@@ -239,6 +239,19 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   }
 
+  // ── DEBUG: Pass2後の夜勤回数診断 ─────────────────────────────────────────
+  staff.forEach((s) => {
+    if (s.max_night_shifts <= 0) return
+    let blockedPair = 0, blockedCan = 0, available = 0
+    for (let d = 0; d < daysInMonth; d++) {
+      if (grid[s.id][d] !== '') { blockedCan++; continue }
+      if (!canAssignNight(grid[s.id], d)) { blockedCan++; continue }
+      if (!nightPairOk(s.id, d)) { blockedPair++; continue }
+      available++
+    }
+    warnings.push(`[DEBUG] ${s.name}: 夜勤${nightCount[s.id]}/${s.max_night_shifts} 割当可${available}日 ペア制約不可${blockedPair}日 その他不可${blockedCan}日`)
+  })
+
   // ── Pass 2.5: 明けの翌日を公休に確定（ハード制約）────────────────────────
   // 夜勤連続（夜→明→夜）の場合は翌日が既に夜なので上書きしない
   staff.forEach((s) => {
