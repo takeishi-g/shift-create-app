@@ -566,10 +566,22 @@ export function generateShifts(input: SolverInput): SolverOutput {
         // 違反条件: 夜/明 が絡む、または両者が同じ休日コード
         const violation = aIsNight || bIsNight || (aIsOff && bIsOff && codeA === codeB)
         if (!violation) continue
-        // 解消: B の夜→日（Pass 7 が孤立明けを公休化）、明/休→公、休どうし→日
-        if (bIsNight) {
+        // 解消: 夜勤数が少ない方を保護し、多い方（または違反元）を変更
+        if (aIsNight && !bIsNight) {
+          // A が夜/明、B は日勤 → A を変更
+          grid[pc.staff_id_a][dayIdx] = codeA === '夜' ? '日' : '公'
+        } else if (!aIsNight && bIsNight) {
+          // B が夜/明、A は日勤 → B を変更
           grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+        } else if (aIsNight && bIsNight) {
+          // 両者が夜/明 → 夜勤数が多い方を変更（少ない方を保護）
+          if ((nightCount[pc.staff_id_a] ?? 0) >= (nightCount[pc.staff_id_b] ?? 0)) {
+            grid[pc.staff_id_a][dayIdx] = codeA === '夜' ? '日' : '公'
+          } else {
+            grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+          }
         } else {
+          // 両者が同コードの休日（公+公 等）→ B を日勤に
           grid[pc.staff_id_b][dayIdx] = '日'
         }
       }
