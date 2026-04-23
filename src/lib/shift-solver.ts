@@ -147,7 +147,9 @@ export function generateShifts(input: SolverInput): SolverOutput {
     const partners = mustNotPairWith.get(staffId)
     if (!partners) return true
     for (const pid of partners) {
-      if (grid[pid]?.[dayIdx] === '夜') return false
+      const code = grid[pid]?.[dayIdx]
+      // 夜: 同日夜勤重複、明: 前日夜勤の翌朝と重複 → どちらも違反
+      if (code === '夜' || code === '明') return false
     }
     return true
   }
