@@ -148,8 +148,9 @@ export function generateShifts(input: SolverInput): SolverOutput {
     if (!partners) return true
     for (const pid of partners) {
       const code = grid[pid]?.[dayIdx]
-      // 夜: 同日夜勤重複、明: 前日夜勤の翌朝と重複 → どちらも違反
-      if (code === '夜' || code === '明') return false
+      // '' → Pass3で日勤が入るのでOK、'日' → 日勤確定でOK
+      // それ以外（夜/明/公/有/他/希休）→ どちらかが日勤でない → NG
+      if (code !== '' && code !== '日') return false
     }
     return true
   }
@@ -576,26 +577,32 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // ── Pass 6: Pair constraints ─────────────────────────────────────────────
   pairConstraints.forEach((pc) => {
     if (pc.constraint_type === 'must_not_pair') {
-      // 重なっていいのは日勤のみ
+      // ルール: どちらかが必ず '日' でなければならない
       const NIGHT_CODES = new Set<ShiftCode>(['夜', '明'])
-      const OFF_CODES   = new Set<ShiftCode>(['公', '有', '他', '希休'])
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         const codeA = grid[pc.staff_id_a]?.[dayIdx]
         const codeB = grid[pc.staff_id_b]?.[dayIdx]
         if (!codeA || !codeB || !grid[pc.staff_id_b]) continue
-        // 両者とも日勤 → 許容
-        if (codeA === '日' && codeB === '日') continue
+        // どちらかが '日' なら OK
+        if (codeA === '日' || codeB === '日') continue
+        // 両者とも '日' 以外 → 違反
         const aIsNight = NIGHT_CODES.has(codeA)
         const bIsNight = NIGHT_CODES.has(codeB)
-        const aIsOff   = OFF_CODES.has(codeA)
-        const bIsOff   = OFF_CODES.has(codeB)
-        // 違反条件: 夜/明 が絡む、または両者が同じ休日コード
-        const violation = aIsNight || bIsNight || (aIsOff && bIsOff && codeA === codeB)
-        if (!violation) continue
-        // 解消: B の夜→日（Pass 7 が孤立明けを公休化）、明/休→公、休どうし→日
-        if (bIsNight) {
-          grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+        if (aIsNight && bIsNight) {
+          // 両者が夜/明 → 夜勤数が多い方を変更
+          if ((nightCount[pc.staff_id_a] ?? 0) >= (nightCount[pc.staff_id_b] ?? 0)) {
+            grid[pc.staff_id_a][dayIdx] = codeA === '夜' ? '日' : '公'
+          } else {
+            grid[pc.staff_id_b][dayIdx] = codeB === '夜' ? '日' : '公'
+          }
+        } else if (aIsNight) {
+          // A が夜/明、B が公/有/他/希休 → B を日に（Aの夜を守る）
+          grid[pc.staff_id_b][dayIdx] = '日'
+        } else if (bIsNight) {
+          // B が夜/明、A が公/有/他/希休 → A を日に（Bの夜を守る）
+          grid[pc.staff_id_a][dayIdx] = '日'
         } else {
+          // 両者とも公/有/他/希休 → B を日に
           grid[pc.staff_id_b][dayIdx] = '日'
         }
       }
