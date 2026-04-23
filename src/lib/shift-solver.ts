@@ -269,7 +269,12 @@ export function generateShifts(input: SolverInput): SolverOutput {
   // 明けは夜勤の構造的付随物なので off 予算にカウントしない
   const OFF_CODES = new Set<ShiftCode>(['公', '有', '他', '希休'])
 
-  staff.forEach((s) => {
+  // ペア制約で先に公休を取った方が有利になるため、夜勤数が多い（制約がきつい）順に処理
+  const staffByNightsDesc = [...staff].sort(
+    (a, b) => (nightCount[b.id] ?? 0) - (nightCount[a.id] ?? 0)
+  )
+
+  staffByNightsDesc.forEach((s) => {
     const offDow = new Set(s.off_days_of_week ?? [])
 
     // Step A: 強制休を先に確定
