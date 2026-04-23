@@ -203,21 +203,32 @@ export function generateShifts(input: SolverInput): SolverOutput {
         return countVisibleOffs(grid[a.id]) - countVisibleOffs(grid[b.id])
       })
 
-    const toStrict = Math.min(needed, eligibleStrict.length)
-    for (let i = 0; i < toStrict; i++) assignNight(eligibleStrict[i], dayIdx)
-    needed -= toStrict
+    // リスト構築後に割り当てるとペアが同日に入るため、割り当て直前に再チェック
+    let assignedStrict = 0
+    for (const s of eligibleStrict) {
+      if (assignedStrict >= needed) break
+      if (!nightPairOk(s.id, dayIdx)) continue
+      assignNight(s, dayIdx)
+      assignedStrict++
+    }
+    needed -= assignedStrict
 
     if (needed > 0) {
       const eligibleRelaxed = staff
-        .filter((s) => s.max_night_shifts > 0 && canAssignNight(grid[s.id], dayIdx) && nightPairOk(s.id, dayIdx))
+        .filter((s) => s.max_night_shifts > 0 && canAssignNight(grid[s.id], dayIdx))
         .sort((a, b) => (nightCount[a.id] - a.max_night_shifts) - (nightCount[b.id] - b.max_night_shifts))
 
-      const toRelaxed = Math.min(needed, eligibleRelaxed.length)
-      for (let i = 0; i < toRelaxed; i++) assignNight(eligibleRelaxed[i], dayIdx)
-      needed -= toRelaxed
+      let assignedRelaxed = 0
+      for (const s of eligibleRelaxed) {
+        if (assignedRelaxed >= needed) break
+        if (!nightPairOk(s.id, dayIdx)) continue
+        assignNight(s, dayIdx)
+        assignedRelaxed++
+      }
+      needed -= assignedRelaxed
 
-      if (toRelaxed > 0) {
-        warnings.push(`${dayIdx + 1}日: 最大夜勤回数を超過して${toRelaxed}人補充しました`)
+      if (assignedRelaxed > 0) {
+        warnings.push(`${dayIdx + 1}日: 最大夜勤回数を超過して${assignedRelaxed}人補充しました`)
       }
     }
 
