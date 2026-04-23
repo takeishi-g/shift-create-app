@@ -287,9 +287,16 @@ export function generateShifts(input: SolverInput): SolverOutput {
     const totalOffs = grid[s.id].filter((c) => OFF_CODES.has(c)).length
     const offBudget = Math.max(0, targetOffDays - totalOffs)
 
+    // ペア制約を考慮: パートナーが既に公休/夜/明の日は公休候補から除外
+    const pairPartners = [...(mustNotPairWith.get(s.id) ?? [])]
     const emptyIndices: number[] = []
     for (let i = 0; i < daysInMonth; i++) {
-      if (grid[s.id][i] === '') emptyIndices.push(i)
+      if (grid[s.id][i] !== '') continue
+      const partnerConflict = pairPartners.some((pid) => {
+        const c = grid[pid]?.[i]
+        return c !== '' && c !== '日'
+      })
+      if (!partnerConflict) emptyIndices.push(i)
     }
 
     const offPositions = new Set<number>()
