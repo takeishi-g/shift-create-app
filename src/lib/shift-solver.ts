@@ -619,6 +619,42 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
+  // ── Pass 6.8: ペア制約解消で減った休日数を補填 ──────────────────────────
+  // Pass 6 で公→日に変えられたスタッフの休日数を、パートナーも日勤の日に公休を再配置して回復
+  staff.forEach((s, staffIdx) => {
+    const deficit = targetOffDays - countVisibleOffs(grid[s.id])
+    if (deficit <= 0) return
+
+    const partners = mustNotPairWith.get(s.id)
+    const candidates: number[] = []
+    for (let d = 0; d < daysInMonth; d++) {
+      if (grid[s.id][d] !== '日') continue
+      if (bathDaySet.has(d)) continue
+      const date = new Date(year, month - 1, d + 1)
+      const dow = date.getDay()
+      // 平日最低人数を割り込む日は除外
+      if (dow !== 0 && dow !== 6 && !HolidayJP.isHoliday(date)) {
+        const dayCount = staff.filter((o) => grid[o.id][d] === '日').length
+        if (dayCount <= minDay) continue
+      }
+      // パートナー全員が '日' の日のみ（制約を再違反しない）
+      const pairOk = !partners || [...partners].every((pid) => grid[pid]?.[d] === '日')
+      if (!pairOk) continue
+      candidates.push(d)
+    }
+
+    const pickCount = Math.min(deficit, candidates.length)
+    if (pickCount === 0) return
+    const chunkSize = candidates.length / pickCount
+    const offset = staffIdx % Math.max(1, Math.round(chunkSize))
+    const chosen = new Set<number>()
+    for (let k = 0; k < pickCount; k++) {
+      const raw = Math.round(k * chunkSize + offset)
+      chosen.add(candidates[Math.max(0, Math.min(candidates.length - 1, raw))])
+    }
+    chosen.forEach((d) => { grid[s.id][d] = '公' })
+  })
+
   // ── Pass 6.5: 夜勤不足スタッフへの修復割り当て ──────────────────────────
   // Pass 6 でペア制約解消のため夜勤を削られたスタッフに夜勤を再割り当てする
   staff.forEach((s) => {
