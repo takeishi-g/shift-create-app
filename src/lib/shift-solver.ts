@@ -617,8 +617,23 @@ export function generateShifts(input: SolverInput): SolverOutput {
           // B が夜/明、A が公/有/他/希休 → A を日に（Bの夜を守る）
           grid[pc.staff_id_a][dayIdx] = '日'
         } else {
-          // 両者とも公/有/他/希休 → B を日に
-          grid[pc.staff_id_b][dayIdx] = '日'
+          // 両者とも公/有/他/希休
+          // 有/他/希休（申請休）は変更不可なので '公' の方を優先変換
+          const aIsLeave = (codeA === '有' || codeA === '他' || codeA === '希休')
+          const bIsLeave = (codeB === '有' || codeB === '他' || codeB === '希休')
+          if (bIsLeave && !aIsLeave) {
+            grid[pc.staff_id_a][dayIdx] = '日'
+          } else if (aIsLeave && !bIsLeave) {
+            grid[pc.staff_id_b][dayIdx] = '日'
+          } else if (!aIsLeave && !bIsLeave) {
+            // 両者とも '公' → 休日数が多い方を日勤に（公平化）
+            if (countVisibleOffs(grid[pc.staff_id_a]) >= countVisibleOffs(grid[pc.staff_id_b])) {
+              grid[pc.staff_id_a][dayIdx] = '日'
+            } else {
+              grid[pc.staff_id_b][dayIdx] = '日'
+            }
+          }
+          // 両者とも申請休の場合は変更不可（warningのみ）
         }
       }
     } else if (pc.constraint_type === 'must_pair') {
