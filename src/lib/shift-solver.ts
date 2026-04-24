@@ -368,15 +368,18 @@ export function generateShifts(input: SolverInput): SolverOutput {
     let currentDay36 = staff.filter((s) => grid[s.id][dayIdx] === '日').length
     if (currentDay36 <= maxWeekend) continue
 
-    // 休日数が少ない（多く働いている）人から優先して公休に
+    // 休日数が多い順（上限超過・余裕あり）から優先して公休に変換
+    // targetOffDays 未満のスタッフは変換しない（上限超過を防ぐ）
     const excess36 = staff
       .filter((s) => grid[s.id][dayIdx] === '日')
-      .sort((a, b) => countVisibleOffs(grid[a.id]) - countVisibleOffs(grid[b.id]))
+      .sort((a, b) => countVisibleOffs(grid[b.id]) - countVisibleOffs(grid[a.id]))
 
     for (const s of excess36) {
       if (currentDay36 <= maxWeekend) break
-      grid[s.id][dayIdx] = '公'
-      currentDay36--
+      if (countVisibleOffs(grid[s.id]) >= targetOffDays) {
+        grid[s.id][dayIdx] = '公'
+        currentDay36--
+      }
     }
   }
 
