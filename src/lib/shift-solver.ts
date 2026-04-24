@@ -264,20 +264,15 @@ export function generateShifts(input: SolverInput): SolverOutput {
   })
 
   // ── Pass 3: Fill remaining with 日勤 or 公休 ────────────────────────────
-  // Step A — 定休曜日・祝日を '公' で確定
+  // Step A — 定休曜日・祝日を '公' で確定（全スタッフ先行）
   // Step B — offBudget を計算し残り空きスロットへ均等配置、残りは '日'
-  // 明けは夜勤の構造的付随物なので off 予算にカウントしない
+  // ※ Step A を全員先行させることで、ペア制約スタッフの定休が互いに確定した後に
+  //   Step B が動き、公+公 違反の発生を防ぐ
   const OFF_CODES = new Set<ShiftCode>(['公', '有', '他', '希休'])
 
-  // ペア制約で先に公休を取った方が有利になるため、夜勤数が多い（制約がきつい）順に処理
-  const staffByNightsDesc = [...staff].sort(
-    (a, b) => (nightCount[b.id] ?? 0) - (nightCount[a.id] ?? 0)
-  )
-
-  staffByNightsDesc.forEach((s) => {
+  // Step A: 全スタッフの定休曜日・祝日を先に確定
+  staff.forEach((s) => {
     const offDow = new Set(s.off_days_of_week ?? [])
-
-    // Step A: 強制休を先に確定
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (grid[s.id][dayIdx] !== '') continue
       const date = new Date(year, month - 1, dayIdx + 1)
@@ -287,8 +282,14 @@ export function generateShifts(input: SolverInput): SolverOutput {
         grid[s.id][dayIdx] = '公'
       }
     }
+  })
 
-    // Step B: offBudget を計算し、残りの空きスロットへ均等配置
+  // Step B: 夜勤数が多い（制約がきつい）順に offBudget を配置、残りは '日'
+  const staffByNightsDesc = [...staff].sort(
+    (a, b) => (nightCount[b.id] ?? 0) - (nightCount[a.id] ?? 0)
+  )
+
+  staffByNightsDesc.forEach((s) => {
     const totalOffs = grid[s.id].filter((c) => OFF_CODES.has(c)).length
     const offBudget = Math.max(0, targetOffDays - totalOffs)
 
