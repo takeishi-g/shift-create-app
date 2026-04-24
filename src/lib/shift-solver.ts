@@ -331,6 +331,18 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
+  // ── [DEBUG] ペア制約スタッフの休日数追跡 ────────────────────────────────
+  function debugPairOff(label: string) {
+    pairConstraints.forEach((pc) => {
+      if (pc.constraint_type !== 'must_not_pair') return
+      const sA = staff.find((s) => s.id === pc.staff_id_a)
+      const sB = staff.find((s) => s.id === pc.staff_id_b)
+      if (!sA || !sB) return
+      warnings.push(`[DEBUG ${label}] ${sA.name}: 休${countVisibleOffs(grid[sA.id])} / ${sB.name}: 休${countVisibleOffs(grid[sB.id])}`)
+    })
+  }
+  debugPairOff('Pass3後')
+
   // ── Pass 3.5: 平日の最低日勤人数確保 ────────────────────────────────────
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
     const date35 = new Date(year, month - 1, dayIdx + 1)
@@ -357,6 +369,8 @@ export function generateShifts(input: SolverInput): SolverOutput {
       warnings.push(`${dayIdx + 1}日(平日): 日勤 最低${minDay}人に対し${currentDay35}人しか確保できません`)
     }
   }
+
+  debugPairOff('Pass3.5後')
 
   // ── Pass 3.6: 土日祝の日勤人数を上限以下に抑制 ─────────────────────────
   // min_staff_weekend を「土日祝の目標上限」として使用（超過分は公休に変換）
@@ -649,6 +663,8 @@ export function generateShifts(input: SolverInput): SolverOutput {
     }
   })
 
+  debugPairOff('Pass6後')
+
   // ── Pass 6.8: ペア制約解消で減った休日数を補填 ──────────────────────────
   // Pass 6 で公→日に変えられたスタッフの休日数を、パートナーも日勤の日に公休を再配置して回復
   staff.forEach((s, staffIdx) => {
@@ -728,6 +744,8 @@ export function generateShifts(input: SolverInput): SolverOutput {
       if (dayIdx + 2 < daysInMonth) grid[s.id][dayIdx + 2] = '公'
     }
   })
+
+  debugPairOff('Pass6.8後')
 
   // ── Pass 7: Remove orphan 明 (明 not preceded by 夜) ───────────────────
   staff.forEach((s) => {
