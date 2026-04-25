@@ -19,6 +19,7 @@ type StaffFormData = {
   max_night_shifts: number
   off_days_of_week: number[]
   off_on_holidays: boolean
+  off_days_constraint: StaffProfile['off_days_constraint']
 }
 
 export default function StaffPage() {

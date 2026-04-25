@@ -23,6 +23,8 @@ export interface StaffProfile {
   off_days_of_week: number[]
   /** 祝日を定休にするか */
   off_on_holidays: boolean
+  /** 定休日制約の強さ */
+  off_days_constraint: 'hard' | 'soft'
   is_active: boolean
   created_at: string
   updated_at: string

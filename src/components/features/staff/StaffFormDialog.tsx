@@ -31,6 +31,7 @@ interface StaffFormData {
   max_night_shifts: number
   off_days_of_week: number[]
   off_on_holidays: boolean
+  off_days_constraint: 'hard' | 'soft'
 }
 
 interface StaffFormDialogProps {
@@ -52,6 +53,7 @@ const defaultForm: StaffFormData = {
   max_night_shifts: 8,
   off_days_of_week: [],
   off_on_holidays: false,
+  off_days_constraint: 'hard',
 }
 
 const QUALIFICATION_LABEL: Record<StaffQualification, string> = {
@@ -87,6 +89,7 @@ export function StaffFormDialog({
           max_night_shifts: initialData.max_night_shifts ?? 8,
           off_days_of_week: initialData.off_days_of_week ?? [],
           off_on_holidays: initialData.off_on_holidays ?? false,
+          off_days_constraint: initialData.off_days_constraint ?? 'hard',
         })
       } else {
         setForm(defaultForm)
@@ -209,6 +212,24 @@ export function StaffFormDialog({
                 />
               </label>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>定休日制約</Label>
+            <Select
+              value={form.off_days_constraint}
+              onValueChange={(value) =>
+                value && setForm({ ...form, off_days_constraint: value as 'hard' | 'soft' })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hard">ハード（変更不可）</SelectItem>
+                <SelectItem value="soft">ソフト（必要時に変更可）</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* 経験年数・月間最大夜勤回数（2列） */}
