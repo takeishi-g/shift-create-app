@@ -22,6 +22,7 @@ interface WorkRules {
   min_rest_hours_after_night: number
   auto_insert_off_after_night: boolean
   min_staff_weekend: number
+  max_staff_weekend: number
   min_staff_bath_day: number
   target_off_days: number
 }
@@ -32,6 +33,7 @@ const INITIAL_WORK_RULES: WorkRules = {
   min_rest_hours_after_night: 11,
   auto_insert_off_after_night: true,
   min_staff_weekend: 3,
+  max_staff_weekend: 4,
   min_staff_bath_day: 4,
   target_off_days: 8,
 }
@@ -106,6 +108,7 @@ export default function ConstraintsPage() {
           min_rest_hours_after_night: data.min_rest_hours_after_night ?? 11,
           auto_insert_off_after_night: data.auto_insert_off_after_night ?? true,
           min_staff_weekend: data.min_staff_weekend ?? 3,
+          max_staff_weekend: data.max_staff_weekend ?? 4,
           min_staff_bath_day: data.min_staff_bath_day ?? 4,
           target_off_days: data.target_off_days ?? 8,
         })
@@ -128,6 +131,7 @@ export default function ConstraintsPage() {
       year_month: selectedMonth,
       min_staff_per_shift: { 日勤: minStaffing.日勤, 夜勤: minStaffing.夜勤 },
       min_staff_weekend: workRules.min_staff_weekend,
+      max_staff_weekend: workRules.max_staff_weekend,
       min_staff_bath_day: workRules.min_staff_bath_day,
       max_consecutive_work_days: workRules.max_consecutive_work_days,
       min_rest_hours_after_night: workRules.min_rest_hours_after_night,
@@ -251,6 +255,16 @@ export default function ConstraintsPage() {
                 type="number" min={0} max={20}
                 value={workRules.min_staff_weekend}
                 onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-sm text-gray-500">人</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝上限人数</Label>
+              <Input
+                type="number" min={0} max={20}
+                value={workRules.max_staff_weekend}
+                onChange={(e) => setWorkRulesField('max_staff_weekend', Number(e.target.value))}
                 className="w-16 text-center"
               />
               <span className="text-sm text-gray-500">人</span>

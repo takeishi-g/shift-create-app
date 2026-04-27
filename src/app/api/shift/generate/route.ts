@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { getDaysInMonth, getDay } from 'date-fns'
 import { generateShifts } from '@/lib/shift-solver'
+import { generateShiftsFallback } from '@/lib/shift-solver-fallback'
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
     return indices
   })()
 
-  const { grid, warnings, targetOffDays } = generateShifts({
+  const solverInput = {
     yearMonth: year_month,
     staff,
     constraints: constraints ?? null,
@@ -79,7 +80,19 @@ export async function POST(request: Request) {
     pairConstraints: pairConstraints ?? [],
     bathDayIndices,
     prevMonthTail,
-  })
+  }
+
+  let { grid, warnings, targetOffDays } = await generateShifts(solverInput)
+
+  const isInfeasible = warnings.some(
+    (w) => w.includes('制約が充足不能') || w.includes('ILP') || w.includes('GLPK') || w.includes('空シフト'),
+  )
+  if (isInfeasible) {
+    const fallback = await generateShiftsFallback(solverInput)
+    grid = fallback.grid
+    warnings = fallback.warnings
+    targetOffDays = fallback.targetOffDays
+  }
 
   return NextResponse.json({ grid, warnings, targetOffDays })
 }
