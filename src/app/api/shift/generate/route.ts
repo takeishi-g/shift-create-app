@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     supabase.from('shift_constraints').select('*').eq('year_month', year_month).maybeSingle(),
     supabase.from('shift_constraints').select('*').is('year_month', null).limit(1).maybeSingle(),
     supabase.from('leave_requests').select('*, preferred_shift_type:shift_types(name, is_overnight)').gte('date', monthStart).lte('date', monthEnd),
-    supabase.from('staff_pair_constraints').select('*'),
+    supabase.from('staff_pair_constraints').select('*, shift_type:shift_types(id, name, is_overnight, is_off)'),
     tailFromBody ? Promise.resolve({ data: null }) :
       supabase.from('shift_assignments').select('staff_id, shift_code, date').in('date', [prevSecondLast, prevLastDay]),
   ])

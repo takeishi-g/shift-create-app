@@ -200,6 +200,14 @@ function consecutiveWorkEndingAt(shifts: ShiftCode[], dayIdx: number): number {
   return count
 }
 
+function pairTargetsNight(pair: StaffPairConstraint): boolean {
+  return pair.shift_type_id === null || pair.shift_type?.is_overnight === true
+}
+
+function pairTargetsDay(pair: StaffPairConstraint): boolean {
+  return pair.shift_type_id === null || pair.shift_type?.is_overnight === false
+}
+
 function addPostSolveWarnings(args: {
   staff: StaffProfile[]
   grid: ShiftGrid
@@ -268,11 +276,16 @@ function addPostSolveWarnings(args: {
 
   for (const pair of pairConstraints) {
     if (pair.constraint_type === 'must_not_pair') {
+      const targetsNight = pairTargetsNight(pair)
+      const targetsDay = pairTargetsDay(pair)
       for (let dayIdx = 0; dayIdx < dayMeta.length; dayIdx++) {
         const a = grid[pair.staff_id_a]?.[dayIdx]
         const b = grid[pair.staff_id_b]?.[dayIdx]
-        if (a === '夜' && b === '夜') {
+        if (targetsNight && a === '夜' && b === '夜') {
           warnings.push(`ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} が同日夜勤になっています`)
+        }
+        if (targetsDay && a === '日' && b === '日') {
+          warnings.push(`ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} が同日日勤になっています`)
         }
       }
       continue
@@ -501,19 +514,46 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     }
   }
 
+  const seniorStaff = staff.filter((member) => member.role === '師長' || member.role === '主任')
+  if (seniorStaff.length > 0) {
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      addRow(
+        `senior_day_coverage__${dayIdx}`,
+        seniorStaff.map((member) => ({ name: varName('w', member.id, dayIdx), coef: 1 })),
+        glpk.GLP_LO,
+        1,
+        0,
+      )
+    }
+  }
+
   for (const pair of pairConstraints) {
     if (pair.constraint_type !== 'must_not_pair') continue
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-      addRow(
-        `must_not_pair__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
-        [
-          { name: varName('n', pair.staff_id_a, dayIdx), coef: 1 },
-          { name: varName('n', pair.staff_id_b, dayIdx), coef: 1 },
-        ],
-        glpk.GLP_UP,
-        0,
-        1,
-      )
+      if (pairTargetsNight(pair)) {
+        addRow(
+          `must_not_pair_night__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
+          [
+            { name: varName('n', pair.staff_id_a, dayIdx), coef: 1 },
+            { name: varName('n', pair.staff_id_b, dayIdx), coef: 1 },
+          ],
+          glpk.GLP_UP,
+          0,
+          1,
+        )
+      }
+      if (pairTargetsDay(pair)) {
+        addRow(
+          `must_not_pair_day__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
+          [
+            { name: varName('w', pair.staff_id_a, dayIdx), coef: 1 },
+            { name: varName('w', pair.staff_id_b, dayIdx), coef: 1 },
+          ],
+          glpk.GLP_UP,
+          0,
+          1,
+        )
+      }
     }
   }
 

@@ -100,6 +100,7 @@ export interface StaffPairConstraint {
   staff_id_b: string
   constraint_type: PairConstraintType
   shift_type_id: string | null
+  shift_type?: Pick<ShiftType, 'id' | 'name' | 'is_overnight' | 'is_off'>
   note: string | null
   created_at: string
 }
