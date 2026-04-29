@@ -80,10 +80,30 @@ function canAssignDayShift(
   return consecutive <= maxConsecutive
 }
 
-function canSeniorCoverDay(grid: ShiftGrid, staffId: string, dayIdx: number, maxConsecutive: number): boolean {
+function canSeniorCoverDay(
+  grid: ShiftGrid,
+  staffId: string,
+  dayIdx: number,
+  maxConsecutive: number,
+  lockedOff?: Set<string>,
+): boolean {
   const code = grid[staffId][dayIdx]
   if (code === '明' || code === '夜') return false
+  if (lockedOff?.has(`${staffId}:${dayIdx}`)) return false
   return canAssignDayShift(grid, staffId, dayIdx, maxConsecutive)
+}
+
+function canAssignOpenDayShift(
+  pairConstraints: StaffPairConstraint[],
+  grid: ShiftGrid,
+  staffId: string,
+  dayIdx: number,
+  maxConsecutive: number,
+): boolean {
+  if (grid[staffId][dayIdx] !== '') return false
+  if (countConsecutive(grid, staffId, dayIdx - 1) >= maxConsecutive) return false
+  if (hasDayMustNotPairOnDay(pairConstraints, grid, staffId, dayIdx)) return false
+  return true
 }
 
 export async function generateShiftsFallback(input: SolverInput): Promise<SolverOutput> {
@@ -107,6 +127,11 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   )
 
   const mustNotPair = buildMustNotPairMap(pairConstraints)
+
+  // 強制割り当て済みセル（夜勤セットで固定された 明/公）を追跡し Pass4 等で上書きしない
+  const lockedOff = new Set<string>()
+  const lockCell = (staffId: string, day: number) => lockedOff.add(`${staffId}:${day}`)
+  const isLocked = (staffId: string, day: number) => lockedOff.has(`${staffId}:${day}`)
 
   // 夜勤カウント管理
   const nightCount = new Map<string, number>(staff.map((m) => [m.id, 0]))
@@ -136,8 +161,11 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   // 前月持ち越しで day0・day1 を設定
   for (const staffId of prevNightDay0) {
     grid[staffId][0] = '明'
-    // 夜勤明けの翌日（day1）も強制休
-    if (daysInMonth > 1 && grid[staffId][1] === '') grid[staffId][1] = '公'
+    lockCell(staffId, 0)
+    if (daysInMonth > 1 && grid[staffId][1] === '') {
+      grid[staffId][1] = '公'
+      lockCell(staffId, 1)
+    }
   }
 
   // --- Pass 1: 夜勤割り当て ---
@@ -161,18 +189,31 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
       if (isSeniorRole(m.role)) {
         const hasOtherSeniorCoverageToday = seniorStaff.some((senior) => {
           if (senior.id === m.id) return false
-          return canSeniorCoverDay(grid, senior.id, dayIdx, maxConsecutive)
+          return canSeniorCoverDay(grid, senior.id, dayIdx, maxConsecutive, lockedOff)
         })
         if (!hasOtherSeniorCoverageToday) return false
 
         if (dayIdx + 1 < daysInMonth) {
           const hasOtherSeniorCoverageNextDay = seniorStaff.some((senior) => {
             if (senior.id === m.id) return false
+            if (isLocked(senior.id, dayIdx + 1)) return false
             const nextDayCode = grid[senior.id][dayIdx + 1]
             if (nextDayCode !== '' && nextDayCode !== '公') return false
             return canAssignDayShift(grid, senior.id, dayIdx + 1, maxConsecutive)
           })
           if (!hasOtherSeniorCoverageNextDay) return false
+        }
+
+        // dayIdx+2 は m.id にとって強制公休となるため、別シニアがカバーできるか確認
+        if (dayIdx + 2 < daysInMonth) {
+          const hasOtherSeniorCoverageDay2 = seniorStaff.some((senior) => {
+            if (senior.id === m.id) return false
+            if (isLocked(senior.id, dayIdx + 2)) return false
+            const day2Code = grid[senior.id][dayIdx + 2]
+            if (day2Code !== '' && day2Code !== '公') return false
+            return canAssignDayShift(grid, senior.id, dayIdx + 2, maxConsecutive)
+          })
+          if (!hasOtherSeniorCoverageDay2) return false
         }
       }
       return true
@@ -188,11 +229,16 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
     for (const staffId of assigned) {
       grid[staffId][dayIdx] = '夜'
+      lockCell(staffId, dayIdx)
       nightCount.set(staffId, (nightCount.get(staffId) ?? 0) + 1)
-      // 翌日を明けに設定（夜勤セットは3点必須）
-      if (dayIdx + 1 < daysInMonth) grid[staffId][dayIdx + 1] = '明'
-      // 翌々日を強制休に設定（無条件）
-      if (dayIdx + 2 < daysInMonth) grid[staffId][dayIdx + 2] = '公'
+      if (dayIdx + 1 < daysInMonth) {
+        grid[staffId][dayIdx + 1] = '明'
+        lockCell(staffId, dayIdx + 1)
+      }
+      if (dayIdx + 2 < daysInMonth) {
+        grid[staffId][dayIdx + 2] = '公'
+        lockCell(staffId, dayIdx + 2)
+      }
     }
 
     if (assigned.length < minNight) {
@@ -242,7 +288,10 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
   // 前月持ち越しで day0 強制休
   for (const staffId of prevNightDay1) {
-    if (grid[staffId][0] === '') grid[staffId][0] = '公'
+    if (grid[staffId][0] === '') {
+      grid[staffId][0] = '公'
+      lockCell(staffId, 0)
+    }
   }
 
   // --- Pass 3: 日勤割り当て ---
@@ -253,6 +302,24 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
     const currentDay = staff.filter((m) => grid[m.id][dayIdx] === '日').length
     let dayAssigned = currentDay
+
+    // 後補正ではなくこの時点でシニア1名を先に確保する
+    if (seniorStaff.length > 0) {
+      const hasSeniorDayShift = seniorStaff.some((m) => grid[m.id][dayIdx] === '日')
+      if (!hasSeniorDayShift) {
+        const seniorCandidate = seniorStaff.find((m) =>
+          canAssignOpenDayShift(pairConstraints, grid, m.id, dayIdx, maxConsecutive)
+        )
+        if (seniorCandidate) {
+          if (!isWeekend || dayAssigned < max) {
+            grid[seniorCandidate.id][dayIdx] = '日'
+            dayAssigned++
+          }
+        } else {
+          warnings.push(`${dayIdx + 1}日: 師長・主任の日勤を1人も確保できません`)
+        }
+      }
+    }
 
     if (dayAssigned < target) {
       const candidates = staff.filter((m) => {
@@ -279,29 +346,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
     }
   }
 
-  // --- Pass 4: 師長・主任の日勤カバレッジ補正 ---
-  if (seniorStaff.length > 0) {
-    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-      const hasSeniorDayShift = seniorStaff.some((member) => grid[member.id][dayIdx] === '日')
-      if (hasSeniorDayShift) continue
-
-      const replacement = seniorStaff.find((member) => {
-        if (grid[member.id][dayIdx] !== '公') return false
-        if (!canAssignDayShift(grid, member.id, dayIdx, maxConsecutive)) return false
-        if (hasDayMustNotPairOnDay(pairConstraints, grid, member.id, dayIdx)) return false
-        return true
-      })
-
-      if (replacement) {
-        grid[replacement.id][dayIdx] = '日'
-        continue
-      }
-
-      warnings.push(`${dayIdx + 1}日: 師長・主任の日勤を1人も確保できません`)
-    }
-  }
-
-  // --- Pass 5: 休日数調整 ---
+  // --- Pass 4: 休日数調整 ---
   const offCodes: ShiftCode[] = ['公', '有', '他', '希休']
   const isOffCode = (c: ShiftCode) => offCodes.includes(c)
 
@@ -314,9 +359,8 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
       let reduced = 0
       for (let dayIdx = 0; dayIdx < daysInMonth && reduced < diff; dayIdx++) {
         if (grid[member.id][dayIdx] !== '公') continue
+        if (isLocked(member.id, dayIdx)) continue
         if (dayMeta[dayIdx].isWeekend) continue
-        // 明け翌日は変換しない
-        if (dayIdx > 0 && grid[member.id][dayIdx - 1] === '明') continue
         if (!canAssignDayShift(grid, member.id, dayIdx, maxConsecutive)) continue
         if (hasDayMustNotPairOnDay(pairConstraints, grid, member.id, dayIdx)) continue
         // 最低人数チェック
