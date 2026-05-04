@@ -20,7 +20,7 @@ import { createClient } from '@/lib/supabase/client'
 type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
 
 interface ShiftDef {
-  code: ShiftCode
+  code: string
   label: string
   bg: string
   text: string
@@ -31,7 +31,7 @@ const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
   日:  { code: '日',  label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
   夜:  { code: '夜',  label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
   明:  { code: '明',  label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
-  公:  { code: '公',  label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
+  公:  { code: '休',  label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
   有:  { code: '有',  label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
   他:  { code: '他',  label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
   希休: { code: '希休', label: '希望休', bg: 'bg-rose-200',   text: 'text-rose-700',   ampm: 'off' },
@@ -113,6 +113,8 @@ export default function ShiftEditPage() {
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genWarnings, setGenWarnings] = useState<string[]>([])
+  const [loadingConfirmed, setLoadingConfirmed] = useState(false)
+  const [loadConfirmedMsg, setLoadConfirmedMsg] = useState<string | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const [staffList, setStaffList] = useState<StaffProfile[]>([])
@@ -127,7 +129,7 @@ export default function ShiftEditPage() {
   useEffect(() => {
     async function loadMasters() {
       const [{ data: staff }, { data: types }] = await Promise.all([
-        supabase.from('staff_profiles').select('*').eq('is_active', true).order('created_at'),
+        supabase.from('staff_profiles').select('*').eq('is_active', true).order('sort_order').order('created_at'),
         supabase.from('shift_types').select('*').order('display_order'),
       ])
       if (staff) setStaffList(staff)
@@ -413,6 +415,7 @@ export default function ShiftEditPage() {
 
   async function handleGenerate() {
     setGenerating(true)
+    setEditCell(null)
     setGenWarnings([])
 
     // 前月グリッドを localStorage から取得
@@ -531,6 +534,66 @@ export default function ShiftEditPage() {
     setSaving(false)
   }
 
+  const VALID_SHIFT_CODES = new Set<string>(['日', '夜', '明', '公', '有', '他', '希休', ''])
+
+  async function handleLoadConfirmed() {
+    if (staffList.length === 0) return
+    setLoadingConfirmed(true)
+    setLoadConfirmedMsg(null)
+    try {
+      const { data: sm, error: smError } = await supabase
+        .from('schedule_months')
+        .select('id')
+        .eq('year_month', selectedMonth)
+        .eq('status', 'confirmed')
+        .maybeSingle()
+
+      if (smError) {
+        setLoadConfirmedMsg('読み込みエラーが発生しました。再試行してください。')
+        return
+      }
+      if (!sm) {
+        setLoadConfirmedMsg('シフトが作成されていません。')
+        return
+      }
+
+      const { data: assignments, error: saError } = await supabase
+        .from('shift_assignments')
+        .select('staff_id, date, shift_code, is_bath_day')
+        .eq('schedule_month_id', sm.id)
+
+      if (saError) {
+        setLoadConfirmedMsg('読み込みエラーが発生しました。再試行してください。')
+        return
+      }
+      if (!assignments || assignments.length === 0) {
+        setLoadConfirmedMsg('シフトが作成されていません。')
+        return
+      }
+
+      const newGrid: Record<string, ShiftCode[]> = {}
+      staffList.forEach((s) => { newGrid[s.id] = makeDefaultShifts(days.length) })
+      const newBath = new Set<number>()
+
+      assignments.forEach(({ staff_id, date, shift_code, is_bath_day }: { staff_id: string; date: string; shift_code: string | null; is_bath_day: boolean | null }) => {
+        const idx = parseInt(date.split('-')[2], 10) - 1
+        if (idx < 0 || idx >= days.length) return
+        const safeCode: ShiftCode = VALID_SHIFT_CODES.has(shift_code ?? '') ? (shift_code as ShiftCode) : '日'
+        if (newGrid[staff_id]) newGrid[staff_id][idx] = safeCode
+        if (is_bath_day) newBath.add(idx)
+      })
+
+      setShiftGrid(newGrid)
+      setBathSet(newBath)
+      setGenWarnings([])
+      setConfirmed(true)
+    } catch {
+      setLoadConfirmedMsg('予期しないエラーが発生しました。再試行してください。')
+    } finally {
+      setLoadingConfirmed(false)
+    }
+  }
+
   const [targetOffDays, setTargetOffDays] = useState<number>(Math.round(30 * 0.27))
 
   // 日ごとの集計
@@ -586,6 +649,13 @@ export default function ShiftEditPage() {
             デフォルトに戻す
           </button>
           <button
+            onClick={handleLoadConfirmed}
+            disabled={loadingConfirmed}
+            className="px-4 py-1.5 text-xs font-semibold text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+          >
+            {loadingConfirmed ? '読み込み中...' : '確定シフトを読み込む'}
+          </button>
+          <button
             onClick={handleGenerate}
             disabled={generating}
             className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-50"
@@ -611,6 +681,13 @@ export default function ShiftEditPage() {
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
           <p className="font-semibold">⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）</p>
           {genWarnings.map((w, i) => <p key={i}>・{w}</p>)}
+        </div>
+      )}
+
+      {/* 確定シフト読み込みメッセージ */}
+      {loadConfirmedMsg && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
+          {loadConfirmedMsg}
         </div>
       )}
 
@@ -792,6 +869,16 @@ export default function ShiftEditPage() {
         onClose={() => setLeaveDeleteTarget(null)}
         onConfirm={handleLeaveDelete}
       />
+
+      {generating && (
+        <div className="fixed inset-0 z-60 bg-black/30 flex items-center justify-center pointer-events-auto">
+          <div className="bg-white rounded-xl px-8 py-6 shadow-xl flex flex-col items-center gap-3">
+            <div className="animate-spin rounded-full h-8 w-8 border-4 border-rose-500 border-t-transparent" />
+            <p className="text-sm font-semibold text-gray-700">シフトを自動生成中...</p>
+            <p className="text-xs text-gray-400">しばらくお待ちください</p>
+          </div>
+        </div>
+      )}
 
       {/* シフト編集ポップオーバー */}
       {editCell && (
