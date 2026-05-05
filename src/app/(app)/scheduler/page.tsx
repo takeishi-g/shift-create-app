@@ -405,8 +405,24 @@ export default function ShiftEditPage() {
   }
 
   function handleReset() {
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
     const newGrid: Record<string, ShiftCode[]> = {}
     staffList.forEach((s) => { newGrid[s.id] = makeDefaultShifts(days.length) })
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth) return
+      if (!newGrid[lr.staff_id]) return
+      const dayIdx = ld - 1
+      if (lr.type === 'シフト希望') {
+        if (lr.preferred_shift_type?.is_overnight) {
+          newGrid[lr.staff_id][dayIdx] = '夜'
+          if (dayIdx + 1 < newGrid[lr.staff_id].length) newGrid[lr.staff_id][dayIdx + 1] = '明'
+        }
+      } else {
+        const code = leaveTypeToShiftCode(lr.type)
+        if (code) newGrid[lr.staff_id][dayIdx] = code
+      }
+    })
     setShiftGrid(newGrid)
     setConfirmed(false)
     setGenWarnings([])
