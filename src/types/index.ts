@@ -25,7 +25,10 @@ export interface StaffProfile {
   off_on_holidays: boolean
   /** 定休日制約の強さ */
   off_days_constraint: 'hard' | 'soft'
+  /** 定休日以外に公休を入れるか（false の場合、定休日のみ休日、目標休日数への追加配分なし） */
+  allow_extra_off_days: boolean
   is_active: boolean
+  sort_order: number
   created_at: string
   updated_at: string
 }
@@ -74,6 +77,8 @@ export interface ShiftConstraints {
   year_month: string | null
   /** シフト種別IDごとの最低配置人数 */
   min_staff_per_shift: Record<string, number>
+  /** シフト種別IDごとの最高配置人数 */
+  max_staff_per_shift: Record<string, number>
   /** 土日の最低配置人数 */
   min_staff_weekend: number
   /** 土日の上限配置人数 */
@@ -122,6 +127,18 @@ export interface LeaveRequest {
   updated_at: string
   staff?: StaffProfile
   preferred_shift_type?: ShiftType
+}
+
+// =============================
+// 繰越休日
+// =============================
+export interface StaffCarryOver {
+  id: string
+  staff_id: string
+  from_month: string
+  to_month: string
+  carry_over_days: number
+  created_at: string
 }
 
 // =============================

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { arrayMove } from '@dnd-kit/sortable'
 import { Plus, Search } from 'lucide-react'
 import { StaffTable } from '@/components/features/staff/StaffTable'
 import { StaffFormDialog } from '@/components/features/staff/StaffFormDialog'
@@ -20,6 +21,7 @@ type StaffFormData = {
   off_days_of_week: number[]
   off_on_holidays: boolean
   off_days_constraint: StaffProfile['off_days_constraint']
+  allow_extra_off_days: boolean
 }
 
 export default function StaffPage() {
@@ -37,6 +39,7 @@ export default function StaffPage() {
         .from('staff_profiles')
         .select('*')
         .eq('is_active', true)
+        .order('sort_order')
         .order('created_at')
       if (data) setStaffList(data)
       setLoading(false)
@@ -79,6 +82,18 @@ export default function StaffPage() {
     setDeleteTarget(null)
   }
 
+  const handleReorder = useCallback((activeId: string, overId: string) => {
+    setStaffList((prev) => {
+      const oldIndex = prev.findIndex((s) => s.id === activeId)
+      const newIndex = prev.findIndex((s) => s.id === overId)
+      const reordered = arrayMove(prev, oldIndex, newIndex).map((s, i) => ({ ...s, sort_order: i + 1 }))
+      reordered.forEach((s) => {
+        supabase.from('staff_profiles').update({ sort_order: s.sort_order }).eq('id', s.id).then(() => {})
+      })
+      return reordered
+    })
+  }, [supabase])
+
   if (loading) return <div className="p-6 text-sm text-gray-500">読み込み中...</div>
 
   return (
@@ -108,6 +123,7 @@ export default function StaffPage() {
         staff={filtered}
         onEdit={(s) => { setEditTarget(s); setFormOpen(true) }}
         onDelete={(s) => setDeleteTarget(s)}
+        onReorder={handleReorder}
       />
 
       <StaffFormDialog

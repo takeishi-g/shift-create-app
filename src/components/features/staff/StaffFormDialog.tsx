@@ -32,6 +32,7 @@ interface StaffFormData {
   off_days_of_week: number[]
   off_on_holidays: boolean
   off_days_constraint: 'hard' | 'soft'
+  allow_extra_off_days: boolean
 }
 
 interface StaffFormDialogProps {
@@ -54,6 +55,7 @@ const defaultForm: StaffFormData = {
   off_days_of_week: [],
   off_on_holidays: false,
   off_days_constraint: 'hard',
+  allow_extra_off_days: true,
 }
 
 const QUALIFICATION_LABEL: Record<StaffQualification, string> = {
@@ -90,6 +92,7 @@ export function StaffFormDialog({
           off_days_of_week: initialData.off_days_of_week ?? [],
           off_on_holidays: initialData.off_on_holidays ?? false,
           off_days_constraint: initialData.off_days_constraint ?? 'hard',
+          allow_extra_off_days: initialData.allow_extra_off_days ?? true,
         })
       } else {
         setForm(defaultForm)
@@ -230,6 +233,24 @@ export function StaffFormDialog({
                 <SelectItem value="soft">ソフト（必要時に変更可）</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <Checkbox
+              id="allow_extra_off_days"
+              checked={form.allow_extra_off_days}
+              onCheckedChange={(checked) =>
+                setForm((prev) => ({ ...prev, allow_extra_off_days: !!checked }))
+              }
+            />
+            <div>
+              <Label htmlFor="allow_extra_off_days" className="cursor-pointer">
+                定休日以外にも休日を入れる
+              </Label>
+              <p className="text-xs text-gray-400">
+                オフにすると定休日・祝日のみ休日になり、目標休日数への追加配分を行いません
+              </p>
+            </div>
           </div>
 
           {/* 経験年数・月間最大夜勤回数（2列） */}
