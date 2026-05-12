@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { getDaysInMonth, getDay, addMonths, startOfMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
+import { useReactToPrint } from 'react-to-print'
 import {
   Select,
   SelectContent,
@@ -11,12 +12,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { StaffProfile, deriveWorkHoursType } from '@/types'
+import { ConstraintSummary } from '@/components/features/constraints/ConstraintSummary'
 import { createClient } from '@/lib/supabase/client'
 
-type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | ''
+type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
 
 interface ShiftDef {
-  code: ShiftCode
+  code: string
   label: string
   bg: string
   text: string
@@ -27,9 +29,10 @@ const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
   日: { code: '日', label: '日勤',   bg: '',               text: 'text-gray-700',   ampm: null },
   夜: { code: '夜', label: '夜勤',   bg: 'bg-violet-200',  text: 'text-violet-800', ampm: 'night' },
   明: { code: '明', label: '明け',   bg: 'bg-violet-100',  text: 'text-violet-500', ampm: 'off' },
-  公: { code: '公', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
+  公: { code: '休', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
   有: { code: '有', label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
   他: { code: '他', label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
+  希休: { code: '希休', label: '希望休', bg: 'bg-rose-200',   text: 'text-rose-700',   ampm: 'off' },
 }
 
 interface StaffRow {
@@ -92,12 +95,16 @@ function qualBadgeClass(s: StaffProfile) {
 
 export default function ShiftTablePage() {
   const supabase = createClient()
+  const printRef = useRef<HTMLDivElement>(null)
   const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [staffList, setStaffList] = useState<StaffProfile[]>([])
   const [shiftMap, setShiftMap] = useState<Record<string, ShiftCode>>({})
   const [bathSet, setBathSet] = useState<Set<string>>(new Set())
+  const [carryOverMap, setCarryOverMap] = useState<Record<string, number>>({})
+  const [shiftPrefMap, setShiftPrefMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const handlePrint = useReactToPrint({ contentRef: printRef, documentTitle: `シフト表_${selectedMonth}` })
 
   useEffect(() => {
     async function loadStaff() {
@@ -105,6 +112,7 @@ export default function ShiftTablePage() {
         .from('staff_profiles')
         .select('*')
         .eq('is_active', true)
+        .order('sort_order')
         .order('created_at')
       if (data) setStaffList(data)
     }
@@ -121,11 +129,31 @@ export default function ShiftTablePage() {
   useEffect(() => {
     async function loadShifts() {
       setLoading(true)
-      const { data: scheduleMonth } = await supabase
-        .from('schedule_months')
-        .select('id')
-        .eq('year_month', selectedMonth)
-        .single()
+      const [y, m] = selectedMonth.split('-').map(Number)
+      const daysCount = getDaysInMonth(new Date(y, m - 1))
+      const monthStart = `${selectedMonth}-01`
+      const monthEnd = `${selectedMonth}-${String(daysCount).padStart(2, '0')}`
+
+      const [{ data: scheduleMonth }, { data: leaveReqs }] = await Promise.all([
+        supabase.from('schedule_months').select('id').eq('year_month', selectedMonth).single(),
+        supabase
+          .from('leave_requests')
+          .select('staff_id, date, preferred_shift_type:shift_types(name)')
+          .eq('type', 'シフト希望')
+          .gte('date', monthStart)
+          .lte('date', monthEnd),
+      ])
+
+      if (leaveReqs) {
+        const prefMap: Record<string, string> = {}
+        leaveReqs.forEach((req) => {
+          const name = (req.preferred_shift_type as unknown as { name: string } | null)?.name
+          if (name) prefMap[`${req.staff_id}:${req.date}`] = name
+        })
+        setShiftPrefMap(prefMap)
+      } else {
+        setShiftPrefMap({})
+      }
 
       if (!scheduleMonth) {
         setShiftMap({})
@@ -149,6 +177,20 @@ export default function ShiftTablePage() {
         setShiftMap(map)
         setBathSet(baths)
       }
+
+      const { data: carryOvers } = await supabase
+        .from('staff_carry_over')
+        .select('staff_id, carry_over_days')
+        .eq('to_month', selectedMonth)
+
+      if (carryOvers) {
+        const coMap: Record<string, number> = {}
+        carryOvers.forEach((c) => { coMap[c.staff_id] = c.carry_over_days })
+        setCarryOverMap(coMap)
+      } else {
+        setCarryOverMap({})
+      }
+
       setLoading(false)
     }
     loadShifts()
@@ -169,18 +211,18 @@ export default function ShiftTablePage() {
         isHoliday: HolidayJP.isHoliday(date),
       }
     })
-    const rows: StaffRow[] = staffList.map((staff, idx) => {
+    const rows: StaffRow[] = staffList.map((staff) => {
       const shifts = days.map((d) => shiftMap[`${staff.id}:${d.dateStr}`] ?? '')
       return {
         staff,
         shifts,
         nightCount: shifts.filter((s) => s === '夜').length,
-        offCount: shifts.filter((s) => s === '公' || s === '有').length,
-        carryOver: idx === 0 ? 1 : 0,
+        offCount: shifts.filter((s) => s === '公' || s === '有' || s === '希休').length,
+        carryOver: carryOverMap[staff.id] ?? 0,
       }
     })
     return { days, rows }
-  }, [selectedMonth, staffList, shiftMap, bathSet, bathDaysDow])
+  }, [selectedMonth, staffList, shiftMap, bathSet, bathDaysDow, carryOverMap])
 
   const dailyCounts = useMemo(() => {
     return days.map((_, i) => {
@@ -200,8 +242,8 @@ export default function ShiftTablePage() {
 
   return (
     <div className="space-y-4 p-4">
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between shrink-0 gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold text-gray-900">シフト表</h1>
           <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
             <SelectTrigger className="w-[150px] bg-white border-gray-200 h-8 text-sm">
@@ -213,15 +255,22 @@ export default function ShiftTablePage() {
               ))}
             </SelectContent>
           </Select>
+          <ConstraintSummary yearMonth={selectedMonth} />
           {loading && <span className="text-xs text-gray-400">読み込み中...</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
+          <button onClick={handlePrint} className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
             PDF出力
           </button>
         </div>
       </div>
 
+      <div ref={printRef}>
+        <div className="hidden print:flex items-center gap-3 mb-3 px-2">
+          <h1 className="text-base font-bold text-gray-900">シフト表</h1>
+          <span className="text-sm text-gray-600">{selectedMonth.replace('-', '年')}月</span>
+          <ConstraintSummary yearMonth={selectedMonth} />
+        </div>
       <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
         <table className="border-collapse text-xs w-full" style={{ minWidth: 'max-content' }}>
           <thead>
@@ -268,17 +317,23 @@ export default function ShiftTablePage() {
                     ({qualLabel(staff)})
                   </span>
                 </td>
-                {days.map(({ day, dow, isHoliday }, i) => {
+                {days.map(({ day, dow, isHoliday, dateStr }, i) => {
                   const code = shifts[i] ?? ''
                   const def = code ? SHIFT_DEF[code] : null
                   const nonWorkday = dow === 0 || dow === 6 || isHoliday
-                  const showBadge = def && !(code === '日' && !nonWorkday)
+                  const prefName = shiftPrefMap[`${staff.id}:${dateStr}`]
+                  const isDayShiftPref = !!prefName && prefName.includes('日勤') && (!code || code === '日')
+                  const showBadge = def && !(code === '日' && !nonWorkday && !isDayShiftPref)
                   return (
                     <td
                       key={day}
                       className={`text-center py-1 px-0 border-b border-gray-100 ${cellBg(dow, isHoliday)}`}
                     >
-                      {showBadge ? (
+                      {isDayShiftPref ? (
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold bg-amber-100 text-amber-700">
+                          希日
+                        </span>
+                      ) : showBadge ? (
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${def.bg} ${def.text}`}>
                           {def.code}
                         </span>
@@ -290,7 +345,15 @@ export default function ShiftTablePage() {
                 })}
                 <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{nightCount}</td>
                 <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{offCount}</td>
-                <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{carryOver}</td>
+                <td className="text-center border-b border-l border-rose-100 px-1">
+                  {carryOver > 0 ? (
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-orange-100 text-orange-600">
+                      {carryOver}
+                    </span>
+                  ) : (
+                    <span className="text-gray-300 text-[10px]">—</span>
+                  )}
+                </td>
               </tr>
             ))}
 
@@ -330,6 +393,7 @@ export default function ShiftTablePage() {
           </tbody>
         </table>
       </div>
+      </div>
 
       <div className="flex items-center gap-3 flex-wrap shrink-0 pb-1">
         {Object.values(SHIFT_DEF).map((s) => (
@@ -340,6 +404,12 @@ export default function ShiftTablePage() {
             <span className="text-xs text-gray-500">{s.label}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1">
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold bg-amber-100 text-amber-700">
+            希日
+          </span>
+          <span className="text-xs text-gray-500">日勤希望</span>
+        </div>
         <div className="flex items-center gap-1 ml-2">
           <span className="text-[10px] font-bold text-cyan-600">風</span>
           <span className="text-xs text-gray-500">お風呂の日</span>

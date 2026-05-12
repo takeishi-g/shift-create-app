@@ -62,6 +62,7 @@ export default function ConstraintsPage() {
   const months = generateMonths()
   const [selectedMonth, setSelectedMonth] = useState(months[1])
   const [minStaffing, setMinStaffing] = useState<MinStaffing>(INITIAL_MIN_STAFFING)
+  const [maxStaffing, setMaxStaffing] = useState<Record<string, number>>({})
   const [workRules, setWorkRules] = useState<WorkRules>(INITIAL_WORK_RULES)
   const [bathDays, setBathDays] = useState<number[]>(INITIAL_BATH_DAYS)
   const [constraintId, setConstraintId] = useState<string | null>(null)
@@ -76,7 +77,7 @@ export default function ConstraintsPage() {
   useEffect(() => {
     async function loadMasters() {
       const [{ data: staff }, { data: types }, { data: pairData }] = await Promise.all([
-        supabase.from('staff_profiles').select('*').eq('is_active', true).order('created_at'),
+        supabase.from('staff_profiles').select('*').eq('is_active', true).order('sort_order').order('created_at'),
         supabase.from('shift_types').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('staff_pair_constraints').select('*').order('created_at'),
       ])
@@ -99,10 +100,11 @@ export default function ConstraintsPage() {
 
       if (data) {
         const minPer = (data.min_staff_per_shift ?? {}) as Record<string, number>
-        setMinStaffing({
-          日勤: minPer['日勤'] ?? 3,
-          夜勤: minPer['夜勤'] ?? 2,
-        })
+        const minDay = minPer['日勤'] ?? 3
+        const minNight = minPer['夜勤'] ?? 2
+        setMinStaffing({ 日勤: minDay, 夜勤: minNight })
+        const maxPer = (data.max_staff_per_shift ?? {}) as Record<string, number>
+        setMaxStaffing({ 日勤: maxPer['日勤'] ?? minDay, 夜勤: maxPer['夜勤'] ?? minNight })
         setWorkRules({
           max_consecutive_work_days: data.max_consecutive_work_days ?? 5,
           min_rest_hours_after_night: data.min_rest_hours_after_night ?? 11,
@@ -117,6 +119,7 @@ export default function ConstraintsPage() {
       } else {
         // 未保存の月はデフォルト値にリセット
         setMinStaffing(INITIAL_MIN_STAFFING)
+        setMaxStaffing({ 日勤: INITIAL_MIN_STAFFING.日勤, 夜勤: INITIAL_MIN_STAFFING.夜勤 })
         setWorkRules(INITIAL_WORK_RULES)
         setBathDays(INITIAL_BATH_DAYS)
         setConstraintId(null)
@@ -130,6 +133,7 @@ export default function ConstraintsPage() {
     const payload = {
       year_month: selectedMonth,
       min_staff_per_shift: { 日勤: minStaffing.日勤, 夜勤: minStaffing.夜勤 },
+      max_staff_per_shift: maxStaffing,
       min_staff_weekend: workRules.min_staff_weekend,
       max_staff_weekend: workRules.max_staff_weekend,
       min_staff_bath_day: workRules.min_staff_bath_day,
@@ -177,6 +181,9 @@ export default function ConstraintsPage() {
     setMinStaffing((prev) => ({ ...prev, [key]: val }))
   }
 
+  const setMaxStaffingField = (id: string, val: number) =>
+    setMaxStaffing((prev) => ({ ...prev, [id]: val }))
+
   function setWorkRulesField<K extends keyof WorkRules>(key: K, val: WorkRules[K]) {
     setWorkRules((prev) => ({ ...prev, [key]: val }))
   }
@@ -218,20 +225,28 @@ export default function ConstraintsPage() {
         {loading && <span className="text-xs text-gray-400 ml-1">読み込み中...</span>}
       </div>
 
-      {/* 最低配置人数 */}
+      {/* 配置人数（最低・最高） */}
       <section className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700">最低配置人数</h2>
+        <h2 className="text-sm font-semibold text-gray-700">配置人数（最低・最高）</h2>
         <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-4">
           {(Object.keys(minStaffing) as (keyof MinStaffing)[]).map((shift) => (
             <div key={shift} className="flex items-center gap-2">
               <Label className="w-10 text-sm text-gray-600 shrink-0">{shift}</Label>
+              <label className="text-xs text-gray-500">最低</label>
               <Input
                 type="number" min={0} max={20}
                 value={minStaffing[shift]}
                 onChange={(e) => setMinStaffingField(shift, Number(e.target.value))}
                 className="w-16 text-center"
               />
-              <span className="text-sm text-gray-500">人</span>
+              <label className="text-xs text-gray-500">最高</label>
+              <Input
+                type="number" min={minStaffing[shift] ?? 0} max={20}
+                value={maxStaffing[shift] ?? minStaffing[shift]}
+                onChange={(e) => setMaxStaffingField(shift, Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-xs text-gray-400">人</span>
             </div>
           ))}
         </div>

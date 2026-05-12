@@ -15,9 +15,11 @@ import { StaffProfile, ShiftType, LeaveRequest, deriveWorkHoursType } from '@/ty
 import { LeaveRequestTable } from '@/components/features/leave-requests/LeaveRequestTable'
 import { LeaveRequestFormDialog } from '@/components/features/leave-requests/LeaveRequestFormDialog'
 import { DeleteConfirmDialog } from '@/components/features/staff/DeleteConfirmDialog'
+import { ConstraintSummary } from '@/components/features/constraints/ConstraintSummary'
 import { createClient } from '@/lib/supabase/client'
 
 type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
+type SolverStatus = 'success' | 'infeasible' | 'error'
 
 interface ShiftDef {
   code: string
@@ -25,6 +27,32 @@ interface ShiftDef {
   bg: string
   text: string
   ampm: 'AM' | 'PM' | 'night' | 'off' | null
+}
+
+function statusLabel(status: SolverStatus | null) {
+  switch (status) {
+    case 'success':
+      return '成功'
+    case 'infeasible':
+      return '充足不能'
+    case 'error':
+      return 'エラー'
+    default:
+      return '未実行'
+  }
+}
+
+function statusClass(status: SolverStatus | null) {
+  switch (status) {
+    case 'success':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case 'infeasible':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    case 'error':
+      return 'border-red-200 bg-red-50 text-red-700'
+    default:
+      return 'border-gray-200 bg-gray-50 text-gray-500'
+  }
 }
 
 const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
@@ -105,6 +133,8 @@ export default function ShiftEditPage() {
   const supabase = createClient()
 
   const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
+  const selectedMonthRef = useRef(TODAY_MONTH)
+  const generateRequestIdRef = useRef(0)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [shiftGrid, setShiftGrid] = useState<Record<string, ShiftCode[]>>({})
   const [bathSet, setBathSet] = useState<Set<number>>(new Set())
@@ -113,6 +143,9 @@ export default function ShiftEditPage() {
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genWarnings, setGenWarnings] = useState<string[]>([])
+  const [solverStatus, setSolverStatus] = useState<SolverStatus | null>(null)
+  const [resultStatus, setResultStatus] = useState<SolverStatus | null>(null)
+  const [fallbackUsed, setFallbackUsed] = useState(false)
   const [loadingConfirmed, setLoadingConfirmed] = useState(false)
   const [loadConfirmedMsg, setLoadConfirmedMsg] = useState<string | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -120,10 +153,15 @@ export default function ShiftEditPage() {
   const [staffList, setStaffList] = useState<StaffProfile[]>([])
   const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([])
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([])
+  const [carryOverMap, setCarryOverMap] = useState<Record<string, number>>({})
   const [leaveFormOpen, setLeaveFormOpen] = useState(false)
   const [leaveEditTarget, setLeaveEditTarget] = useState<LeaveRequest | null>(null)
   const [leaveDeleteTarget, setLeaveDeleteTarget] = useState<LeaveRequest | null>(null)
   const [leaveCellPreset, setLeaveCellPreset] = useState<{ staff_id: string; date: string } | undefined>(undefined)
+
+  useEffect(() => {
+    selectedMonthRef.current = selectedMonth
+  }, [selectedMonth])
 
   // マスタデータ読み込み
   useEffect(() => {
@@ -163,6 +201,20 @@ export default function ShiftEditPage() {
       if (stored) setBathDaysDow(JSON.parse(stored))
     } catch {}
   }, [])
+
+  // 月変更時に繰越休日数を読み込む
+  useEffect(() => {
+    async function loadCarryOver() {
+      const { data } = await supabase
+        .from('staff_carry_over')
+        .select('staff_id, carry_over_days')
+        .eq('to_month', selectedMonth)
+      const map: Record<string, number> = {}
+      if (data) data.forEach(c => { map[c.staff_id] = c.carry_over_days })
+      setCarryOverMap(map)
+    }
+    loadCarryOver()
+  }, [selectedMonth])
 
   // 月変更時に希望休を読み込む
   useEffect(() => {
@@ -280,7 +332,12 @@ export default function ShiftEditPage() {
     const daysInMonth = getDaysInMonth(new Date(year, month - 1))
     return Array.from({ length: daysInMonth }, (_, i) => {
       const date = new Date(year, month - 1, i + 1)
-      return { day: i + 1, dow: getDay(date), isHoliday: HolidayJP.isHoliday(date) }
+      return {
+        day: i + 1,
+        dow: getDay(date),
+        isHoliday: HolidayJP.isHoliday(date),
+        dateStr: `${selectedMonth}-${String(i + 1).padStart(2, '0')}`,
+      }
     })
   }, [selectedMonth])
 
@@ -308,6 +365,12 @@ export default function ShiftEditPage() {
         setBathSet(Array.isArray(savedBath) ? new Set(savedBath) : defaultBath)
         setEditCell(null)
         setConfirmed(false)
+        setGenWarnings([])
+        generateRequestIdRef.current += 1
+        setGenerating(false)
+        setSolverStatus(null)
+        setResultStatus(null)
+        setFallbackUsed(false)
         return
       }
     } catch {}
@@ -318,6 +381,12 @@ export default function ShiftEditPage() {
     setBathSet(defaultBath)
     setEditCell(null)
     setConfirmed(false)
+    setGenWarnings([])
+    generateRequestIdRef.current += 1
+    setGenerating(false)
+    setSolverStatus(null)
+    setResultStatus(null)
+    setFallbackUsed(false)
   }, [days, bathDaysDow, staffList])
 
   // shiftGrid / bathSet の変更を localStorage に保存（空グリッドは除外）
@@ -335,6 +404,14 @@ export default function ShiftEditPage() {
   useEffect(() => {
     if (leaveRequests.length === 0) return
     const [selYear, selMonth] = selectedMonth.split('-').map(Number)
+    // 翌日チェック用: 希望休・有給等の dayIndex を staff 別に事前収集
+    const leaveDaysByStaff = new Map<string, Set<number>>()
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth || lr.type === 'シフト希望') return
+      if (!leaveDaysByStaff.has(lr.staff_id)) leaveDaysByStaff.set(lr.staff_id, new Set())
+      leaveDaysByStaff.get(lr.staff_id)!.add(ld - 1)
+    })
     setShiftGrid((prev) => {
       const next: Record<string, ShiftCode[]> = {}
       Object.entries(prev).forEach(([id, shifts]) => { next[id] = [...shifts] })
@@ -345,12 +422,21 @@ export default function ShiftEditPage() {
         const dayIdx = ld - 1
         if (lr.type === 'シフト希望') {
           if (lr.preferred_shift_type?.is_overnight) {
+            // '明'のセルは夜勤翌日として確定済みのため上書き不可
+            if (next[lr.staff_id][dayIdx] === '明') return
+            // 翌日が希望休・有給等の場合は夜勤を入れられない（翌日が明けにできないため）
+            if (leaveDaysByStaff.get(lr.staff_id)?.has(dayIdx + 1)) return
             next[lr.staff_id][dayIdx] = '夜'
-            if (dayIdx + 1 < next[lr.staff_id].length) next[lr.staff_id][dayIdx + 1] = '明'
+            if (dayIdx + 1 < next[lr.staff_id].length) {
+              if (next[lr.staff_id][dayIdx + 1] !== '明') {
+                next[lr.staff_id][dayIdx + 1] = '明'
+              }
+            }
           }
         } else {
           const code = leaveTypeToShiftCode(lr.type)
-          if (code) next[lr.staff_id][dayIdx] = code
+          // '明'のセルは夜勤翌日として確定済みのため上書き不可
+          if (code && next[lr.staff_id][dayIdx] !== '明') next[lr.staff_id][dayIdx] = code
         }
       })
       return next
@@ -405,18 +491,59 @@ export default function ShiftEditPage() {
   }
 
   function handleReset() {
+    const [selYear, selMonth] = selectedMonth.split('-').map(Number)
     const newGrid: Record<string, ShiftCode[]> = {}
     staffList.forEach((s) => { newGrid[s.id] = makeDefaultShifts(days.length) })
+    const leaveDaysByStaff = new Map<string, Set<number>>()
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth || lr.type === 'シフト希望') return
+      if (!leaveDaysByStaff.has(lr.staff_id)) leaveDaysByStaff.set(lr.staff_id, new Set())
+      leaveDaysByStaff.get(lr.staff_id)!.add(ld - 1)
+    })
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth) return
+      if (!newGrid[lr.staff_id]) return
+      const dayIdx = ld - 1
+      if (lr.type === 'シフト希望') {
+        if (lr.preferred_shift_type?.is_overnight) {
+          // '明'のセルは夜勤翌日として確定済みのため上書き不可
+          if (newGrid[lr.staff_id][dayIdx] === '明') return
+          // 翌日が希望休・有給等の場合は夜勤を入れられない（翌日が明けにできないため）
+          if (leaveDaysByStaff.get(lr.staff_id)?.has(dayIdx + 1)) return
+          newGrid[lr.staff_id][dayIdx] = '夜'
+          if (dayIdx + 1 < newGrid[lr.staff_id].length) {
+            if (newGrid[lr.staff_id][dayIdx + 1] !== '明') {
+              newGrid[lr.staff_id][dayIdx + 1] = '明'
+            }
+          }
+        }
+      } else {
+        const code = leaveTypeToShiftCode(lr.type)
+        // '明'のセルは夜勤翌日として確定済みのため上書き不可
+        if (code && newGrid[lr.staff_id][dayIdx] !== '明') newGrid[lr.staff_id][dayIdx] = code
+      }
+    })
     setShiftGrid(newGrid)
     setConfirmed(false)
     setGenWarnings([])
+    setSolverStatus(null)
+    setResultStatus(null)
+    setFallbackUsed(false)
     try { localStorage.removeItem(sessionKey(selectedMonth)) } catch {}
   }
 
   async function handleGenerate() {
+    const requestId = generateRequestIdRef.current + 1
+    generateRequestIdRef.current = requestId
+    const requestMonth = selectedMonth
     setGenerating(true)
     setEditCell(null)
     setGenWarnings([])
+    setSolverStatus(null)
+    setResultStatus(null)
+    setFallbackUsed(false)
 
     // 前月グリッドを localStorage から取得
     const [selYear, selMonth] = selectedMonth.split('-').map(Number)
@@ -453,6 +580,9 @@ export default function ShiftEditPage() {
       }),
     })
     const json = await res.json()
+    if (requestId !== generateRequestIdRef.current || requestMonth !== selectedMonthRef.current) {
+      return
+    }
     if (!res.ok) {
       setGenWarnings([json.error ?? '生成に失敗しました'])
       setGenerating(false)
@@ -483,9 +613,51 @@ export default function ShiftEditPage() {
       resultGrid = corrected
     }
 
+    // ソルバーが希休を正しく返さなかった場合に備えて、
+    // 生成結果グリッドへ leave_requests を強制上書きする。
+    // （ソルバー側で反映済みの場合も上書きは冪等のため問題なし）
+    // '明'（夜勤明け）はハード制約のため leaveRequests で上書きしない
+    const leaveDaysByStaff = new Map<string, Set<number>>()
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth || lr.type === 'シフト希望') return
+      if (!leaveDaysByStaff.has(lr.staff_id)) leaveDaysByStaff.set(lr.staff_id, new Set())
+      leaveDaysByStaff.get(lr.staff_id)!.add(ld - 1)
+    })
+    leaveRequests.forEach((lr) => {
+      const [ly, lm, ld] = lr.date.split('-').map(Number)
+      if (ly !== selYear || lm !== selMonth) return
+      if (!resultGrid[lr.staff_id]) return
+      const dayIdx = ld - 1
+      if (dayIdx < 0 || dayIdx >= resultGrid[lr.staff_id].length) return
+      if (lr.type === 'シフト希望') {
+        if (lr.preferred_shift_type?.is_overnight) {
+          // '明'のセルは夜勤翌日として確定済みのため上書き不可
+          if (resultGrid[lr.staff_id][dayIdx] === '明') return
+          // 翌日が希望休・有給等の場合は夜勤を入れられない（翌日が明けにできないため）
+          if (leaveDaysByStaff.get(lr.staff_id)?.has(dayIdx + 1)) return
+          resultGrid[lr.staff_id][dayIdx] = '夜'
+          if (dayIdx + 1 < resultGrid[lr.staff_id].length) {
+            // 翌日が既に別の夜勤明けでなければ '明' を設定
+            if (resultGrid[lr.staff_id][dayIdx + 1] !== '明') {
+              resultGrid[lr.staff_id][dayIdx + 1] = '明'
+            }
+          }
+        }
+      } else {
+        const code = leaveTypeToShiftCode(lr.type)
+        // '明'のセルは夜勤翌日として確定済みのため上書き不可
+        if (code && resultGrid[lr.staff_id][dayIdx] !== '明') resultGrid[lr.staff_id][dayIdx] = code
+      }
+    })
+
     setShiftGrid(resultGrid)
     if (json.warnings?.length > 0) setGenWarnings(json.warnings)
+    else setGenWarnings([])
     if (typeof json.targetOffDays === 'number') setTargetOffDays(json.targetOffDays)
+    setSolverStatus(json.solverStatus ?? null)
+    setResultStatus(json.resultStatus ?? json.solverStatus ?? null)
+    setFallbackUsed(Boolean(json.fallbackUsed))
     setConfirmed(false)
     setGenerating(false)
   }
@@ -586,6 +758,9 @@ export default function ShiftEditPage() {
       setShiftGrid(newGrid)
       setBathSet(newBath)
       setGenWarnings([])
+      setSolverStatus(null)
+      setResultStatus(null)
+      setFallbackUsed(false)
       setConfirmed(true)
     } catch {
       setLoadConfirmedMsg('予期しないエラーが発生しました。再試行してください。')
@@ -627,8 +802,8 @@ export default function ShiftEditPage() {
   return (
     <div className="space-y-4 p-4">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between shrink-0 gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold text-gray-900">シフト編集</h1>
           <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
             <SelectTrigger className="w-[150px] bg-white border-gray-200 h-8 text-sm">
@@ -640,6 +815,7 @@ export default function ShiftEditPage() {
               ))}
             </SelectContent>
           </Select>
+          <ConstraintSummary yearMonth={selectedMonth} />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -677,9 +853,30 @@ export default function ShiftEditPage() {
       </div>
 
       {/* 生成警告 */}
-      {genWarnings.length > 0 && (
+      {(solverStatus !== null || resultStatus !== null) && (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs text-gray-700">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-gray-900">生成ステータス</span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusClass(solverStatus)}`}>
+              CSP: {statusLabel(solverStatus)}
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${statusClass(resultStatus)}`}>
+              最終結果: {statusLabel(resultStatus)}
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${fallbackUsed ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
+              fallback: {fallbackUsed ? '使用' : '未使用'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {(fallbackUsed || genWarnings.length > 0) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
-          <p className="font-semibold">⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）</p>
+          <p className="font-semibold">
+            {fallbackUsed
+              ? '⚠️ 制約ソルバーでは解けなかったため、ベストエフォート結果を表示しています（必要に応じて手動修正してください）'
+              : '⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）'}
+          </p>
           {genWarnings.map((w, i) => <p key={i}>・{w}</p>)}
         </div>
       )}
@@ -738,6 +935,9 @@ export default function ShiftEditPage() {
               const shifts = shiftGrid[staff.id] ?? []
               const nightCount = shifts.filter(s => s === '夜').length
               const offCount = shifts.filter(s => s === '公' || s === '有' || s === '他' || s === '希休').length
+              const paidLeaveCount = shifts.filter(s => s === '有').length
+              const staffCarryOver = carryOverMap[staff.id] ?? 0
+              const effectiveTarget = targetOffDays + paidLeaveCount
               return (
                 <tr key={staff.id} className={staffIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}>
                   {/* 氏名（sticky） */}
@@ -748,11 +948,13 @@ export default function ShiftEditPage() {
                     </span>
                   </td>
                   {/* シフトセル（クリックで編集） */}
-                  {days.map(({ day, dow, isHoliday }, i) => {
+                  {days.map(({ day, dow, isHoliday, dateStr }, i) => {
                     const code = shifts[i] ?? ''
                     const def = code ? SHIFT_DEF[code] : null
                     const nonWorkday = dow === 0 || dow === 6 || isHoliday
-                    const showBadge = def && !(code === '日' && !nonWorkday)
+                    const leave = leaveRequestMap.get(`${staff.id}:${dateStr}`)
+                    const isDayShiftPref = leave?.type === 'シフト希望' && !leave.preferred_shift_type?.is_overnight && code === '日'
+                    const showBadge = def && !(code === '日' && !nonWorkday && !isDayShiftPref)
                     const isEditing = editCell?.staffId === staff.id && editCell?.dayIdx === i
                     return (
                       <td
@@ -760,7 +962,11 @@ export default function ShiftEditPage() {
                         onClick={(e) => handleCellClick(staff.id, i, e)}
                         className={`text-center py-1 px-0 border-b border-gray-100 cursor-pointer hover:brightness-95 transition-[filter] ${cellBg(dow, isHoliday)} ${isEditing ? 'outline-2 outline-rose-400 -outline-offset-2' : ''}`}
                       >
-                        {showBadge ? (
+                        {isDayShiftPref ? (
+                          <span className="inline-flex items-center justify-center w-6 h-5 rounded text-[8px] font-bold bg-amber-100 text-amber-700">
+                            希日
+                          </span>
+                        ) : showBadge ? (
                           <span className={`inline-flex items-center justify-center h-5 rounded font-bold ${def.code.length > 1 ? 'w-6 text-[8px]' : 'w-5 text-[10px]'} ${def.bg} ${def.text}`}>
                             {def.code}
                           </span>
@@ -772,8 +978,16 @@ export default function ShiftEditPage() {
                   })}
                   {/* 右側集計 */}
                   <td className="text-center border-b border-l border-rose-100 text-gray-700 font-medium px-1">{nightCount}</td>
-                  <td className={`text-center border-b border-l border-rose-100 font-medium px-1 ${Math.abs(offCount - targetOffDays) > 1 ? 'bg-red-100 text-red-600' : 'text-gray-700'}`}>{offCount}</td>
-                  <td className="text-center border-b border-l border-rose-100 text-gray-500 px-1">{0}</td>
+                  <td className={`text-center border-b border-l border-rose-100 font-medium px-1 ${offCount !== effectiveTarget ? 'bg-red-100 text-red-600' : 'text-gray-700'}`}>{offCount}</td>
+                  <td className="text-center border-b border-l border-rose-100 px-1">
+                    {staffCarryOver > 0 ? (
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-orange-100 text-orange-600">
+                        {staffCarryOver}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 text-[10px]">—</span>
+                    )}
+                  </td>
                 </tr>
               )
             })}
@@ -828,6 +1042,10 @@ export default function ShiftEditPage() {
             <span>{s.label}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1">
+          <span className="inline-flex items-center justify-center w-6 h-5 rounded text-[8px] font-bold bg-amber-100 text-amber-700">希日</span>
+          <span>日勤希望</span>
+        </div>
         <div className="flex items-center gap-1 ml-2">
           <span className="text-[10px] font-bold text-cyan-600">風</span>
           <span>お風呂の日（上段クリックで切り替え）</span>
