@@ -1,398 +1,256 @@
 import { getDaysInMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
-import type { SolverInput, SolverOutput, ShiftCode, ShiftGrid } from './shift-solver'
-import type { StaffPairConstraint } from '@/types'
+import type { ShiftCode, ShiftGrid, SolverInput, SolverOutput } from './shift-solver'
 
-function buildDayMeta(year: number, month: number, daysInMonth: number) {
-  return Array.from({ length: daysInMonth }, (_, i) => {
-    const date = new Date(year, month - 1, i + 1)
-    const dow = date.getDay()
-    return { isWeekend: dow === 0 || dow === 6 || HolidayJP.isHoliday(date), date }
-  })
+function emptyGrid(staff: SolverInput['staff'], daysInMonth: number): ShiftGrid {
+  return Object.fromEntries(
+    staff.map((member) => [member.id, Array(daysInMonth).fill('') as ShiftCode[]]),
+  )
 }
 
-function buildMustNotPairMap(pairConstraints: StaffPairConstraint[]): Map<string, Set<string>> {
-  const map = new Map<string, Set<string>>()
-  for (const p of pairConstraints) {
-    if (p.constraint_type !== 'must_not_pair') continue
-    if (p.shift_type_id !== null && p.shift_type?.is_overnight === false) continue
-    if (!map.has(p.staff_id_a)) map.set(p.staff_id_a, new Set())
-    if (!map.has(p.staff_id_b)) map.set(p.staff_id_b, new Set())
-    map.get(p.staff_id_a)!.add(p.staff_id_b)
-    map.get(p.staff_id_b)!.add(p.staff_id_a)
-  }
-  return map
+function isWork(code: ShiftCode): boolean {
+  return code === '日' || code === '夜'
 }
 
-function hasDayMustNotPairOnDay(
-  pairConstraints: StaffPairConstraint[],
-  grid: ShiftGrid,
-  staffId: string,
-  dayIdx: number,
-): boolean {
-  return pairConstraints.some((pair) => {
-    if (pair.constraint_type !== 'must_not_pair') return false
-    if (pair.shift_type_id !== null && pair.shift_type?.is_overnight === true) return false
-
-    const partnerId = pair.staff_id_a === staffId
-      ? pair.staff_id_b
-      : pair.staff_id_b === staffId
-        ? pair.staff_id_a
-        : null
-    return partnerId !== null && grid[partnerId]?.[dayIdx] === '日'
-  })
+function isOff(code: ShiftCode): boolean {
+  return code === '公' || code === '有' || code === '他' || code === '希休'
 }
 
-function countConsecutive(grid: ShiftGrid, staffId: string, dayIdx: number): number {
-  let count = 0
-  for (let i = dayIdx; i >= 0; i--) {
-    const code = grid[staffId][i]
-    if (code === '日' || code === '夜') count++
+function canAssignNight(grid: ShiftGrid, staffId: string, dayIdx: number, maxConsecutive: number): boolean {
+  const shifts = grid[staffId]
+  if (shifts[dayIdx] !== '') return false
+  if (dayIdx > 0 && (shifts[dayIdx - 1] === '夜' || shifts[dayIdx - 1] === '明')) return false
+  if (dayIdx + 1 < shifts.length && shifts[dayIdx + 1] !== '') return false
+  if (dayIdx + 2 < shifts.length && shifts[dayIdx + 2] !== '') return false
+
+  let streak = 1
+  for (let idx = dayIdx - 1; idx >= 0; idx--) {
+    if (isWork(shifts[idx])) streak += 1
     else break
   }
-  return count
+  return streak <= maxConsecutive
 }
 
-function isSeniorRole(role: string): boolean {
-  return role === '師長' || role === '主任'
-}
+function canAssignDay(grid: ShiftGrid, staffId: string, dayIdx: number, maxConsecutive: number): boolean {
+  const shifts = grid[staffId]
+  if (shifts[dayIdx] !== '') return false
+  if (dayIdx > 0 && (shifts[dayIdx - 1] === '夜' || shifts[dayIdx - 1] === '明')) return false
+  if (dayIdx + 1 < shifts.length && shifts[dayIdx + 1] === '夜') return false
 
-function canAssignDayShift(
-  grid: ShiftGrid,
-  staffId: string,
-  dayIdx: number,
-  maxConsecutive: number,
-): boolean {
-  let consecutive = 1
-
-  for (let i = dayIdx - 1; i >= 0; i--) {
-    const code = grid[staffId][i]
-    if (code === '日' || code === '夜') consecutive++
+  let before = 0
+  for (let idx = dayIdx - 1; idx >= 0; idx--) {
+    if (isWork(shifts[idx])) before += 1
     else break
   }
-
-  for (let i = dayIdx + 1; i < grid[staffId].length; i++) {
-    const code = grid[staffId][i]
-    if (code === '日' || code === '夜') consecutive++
+  let after = 0
+  for (let idx = dayIdx + 1; idx < shifts.length; idx++) {
+    if (isWork(shifts[idx])) after += 1
     else break
   }
-
-  return consecutive <= maxConsecutive
+  return before + 1 + after <= maxConsecutive
 }
 
-function canAssignOpenDayShift(
-  pairConstraints: StaffPairConstraint[],
-  grid: ShiftGrid,
-  staffId: string,
+function getDayRequirements(
+  constraints: SolverInput['constraints'],
+  shiftTypes: SolverInput['shiftTypes'],
   dayIdx: number,
-  maxConsecutive: number,
-): boolean {
-  if (grid[staffId][dayIdx] !== '') return false
-  if (countConsecutive(grid, staffId, dayIdx - 1) >= maxConsecutive) return false
-  if (hasDayMustNotPairOnDay(pairConstraints, grid, staffId, dayIdx)) return false
-  return true
+  year: number,
+  month: number,
+  bathSet: Set<number>,
+) {
+  const date = new Date(year, month - 1, dayIdx + 1)
+  const isWeekend = date.getDay() === 0 || date.getDay() === 6 || HolidayJP.isHoliday(date)
+  const nightShiftType = shiftTypes?.find((shiftType) => shiftType.is_overnight && !shiftType.is_off)
+  const dayShiftType = shiftTypes?.find((shiftType) => !shiftType.is_overnight && !shiftType.is_off)
+  const dayKey = dayShiftType?.name ?? '日勤'
+  const minDay = Number(constraints?.min_staff_per_shift?.[dayKey] ?? constraints?.min_staff_per_shift?.['日勤'] ?? 3)
+  const maxDay = Number(constraints?.max_staff_per_shift?.[dayKey] ?? constraints?.max_staff_per_shift?.['日勤'] ?? minDay)
+  const minWeekend = constraints?.min_staff_weekend ?? minDay
+  const maxWeekend = constraints?.max_staff_weekend ?? maxDay
+  const minBathDay = constraints?.min_staff_bath_day ?? minDay
+  const requiredDay = bathSet.has(dayIdx)
+    ? Math.max(isWeekend ? minWeekend : minDay, minBathDay)
+    : (isWeekend ? minWeekend : minDay)
+  const dayLimit = isWeekend ? maxWeekend : maxDay
+  const nightKey = nightShiftType?.name ?? '夜勤'
+  const minNight = Number(constraints?.min_staff_per_shift?.[nightKey] ?? constraints?.min_staff_per_shift?.['夜勤'] ?? 2)
+  return { requiredDay, dayLimit, minNight, isWeekend }
 }
 
 export async function generateShiftsFallback(input: SolverInput): Promise<SolverOutput> {
-  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, prevMonthTail } = input
-  const warnings: string[] = ['⚠️ ベストエフォートで生成しました（一部制約を満たせない場合があります）']
+  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail } = input
+  const warnings: string[] = ['⚠️ 制約ソルバーで解けなかったため、ベストエフォートで生成しました']
 
   const [year, month] = yearMonth.split('-').map(Number)
   const daysInMonth = getDaysInMonth(new Date(year, month - 1))
-  const dayMeta = buildDayMeta(year, month, daysInMonth)
-
-  const minNight = (constraints?.min_staff_per_shift?.['夜勤']) ?? 2
-  const minDay = (constraints?.min_staff_per_shift?.['日勤']) ?? 5
-  const minWeekend = constraints?.min_staff_weekend ?? 2
-  const maxWeekend = constraints?.max_staff_weekend ?? 2
-  const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
+  const grid = emptyGrid(staff, daysInMonth)
   const targetOffDays = constraints?.target_off_days ?? Math.round(daysInMonth * 0.27)
+  const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
 
-  const grid: ShiftGrid = Object.fromEntries(
-    staff.map((m) => [m.id, Array(daysInMonth).fill('') as ShiftCode[]])
-  )
+  const paidLeaveCountByStaff = new Map<string, number>()
+  const nightCount = new Map<string, number>(staff.map((member) => [member.id, 0]))
+  const bathSet = new Set(bathDayIndices)
 
-  const mustNotPair = buildMustNotPairMap(pairConstraints)
-  const seniorStaff = staff.filter((member) => isSeniorRole(member.role))
+  for (const leaveRequest of leaveRequests) {
+    const [reqYear, reqMonth, reqDay] = leaveRequest.date.split('-').map(Number)
+    if (reqYear !== year || reqMonth !== month) continue
+    const dayIdx = reqDay - 1
+    if (dayIdx < 0 || dayIdx >= daysInMonth || !grid[leaveRequest.staff_id]) continue
 
-  // frozenCells: 上書き不可セル（Step A の確定 + Step B の夜勤セット）
-  const frozenCells = new Set<string>()
-  const freezeCell = (staffId: string, day: number) => frozenCells.add(`${staffId}:${day}`)
-  const isFrozen = (staffId: string, day: number) => frozenCells.has(`${staffId}:${day}`)
+    if (leaveRequest.type === '有給') {
+      paidLeaveCountByStaff.set(leaveRequest.staff_id, (paidLeaveCountByStaff.get(leaveRequest.staff_id) ?? 0) + 1)
+      grid[leaveRequest.staff_id][dayIdx] = '有'
+      continue
+    }
+    if (leaveRequest.type === '希望休') {
+      grid[leaveRequest.staff_id][dayIdx] = '希休'
+      continue
+    }
+    if (leaveRequest.type === '特別休暇' || leaveRequest.type === '他') {
+      grid[leaveRequest.staff_id][dayIdx] = '他'
+      continue
+    }
+  }
 
-  const nightCount = new Map<string, number>(staff.map((m) => [m.id, 0]))
-
-  // ========================================================
-  // Step A: ハード制約の事前確定
-  // ========================================================
-
-  // A-1: 前月持ち越し
-  const prevNightDay0 = new Set<string>()
-  const prevNightDay1 = new Set<string>()
-
-  if (prevMonthTail && prevMonthTail.length > 0) {
+  if (prevMonthTail) {
     const byStaff = new Map<string, Map<number, string>>()
     for (const item of prevMonthTail) {
-      if (!byStaff.has(item.staff_id)) byStaff.set(item.staff_id, new Map())
-      byStaff.get(item.staff_id)!.set(item.day, item.shift_code)
+      const days = byStaff.get(item.staff_id) ?? new Map<number, string>()
+      days.set(item.day, item.shift_code)
+      byStaff.set(item.staff_id, days)
     }
     for (const [staffId, days] of byStaff) {
       const lastDay = Math.max(...days.keys())
-      if (days.get(lastDay) === '夜') prevNightDay0.add(staffId)
-      if (days.get(lastDay - 1) === '夜' || days.get(lastDay) === '明') prevNightDay1.add(staffId)
+      const lastCode = days.get(lastDay) ?? ''
+      const secondLastCode = days.get(lastDay - 1) ?? ''
+      if (lastCode === '夜') {
+        grid[staffId][0] = '明'
+        if (daysInMonth > 1 && grid[staffId][1] === '') grid[staffId][1] = '公'
+      } else if (lastCode === '明' || secondLastCode === '夜') {
+        if (grid[staffId][0] === '') grid[staffId][0] = '公'
+      }
     }
   }
 
-  for (const staffId of prevNightDay0) {
-    grid[staffId][0] = '明'
-    freezeCell(staffId, 0)
-    if (daysInMonth > 1) {
-      grid[staffId][1] = '公'
-      freezeCell(staffId, 1)
-    }
-  }
-  for (const staffId of prevNightDay1) {
-    if (grid[staffId][0] === '') {
-      grid[staffId][0] = '公'
-      freezeCell(staffId, 0)
-    }
-  }
-
-  // A-2: 有給・希望休・特別休暇
-  const leaveCodeMap: Record<string, ShiftCode> = {
-    '希望休': '希休',
-    '有給': '有',
-    '特別休暇': '他',
-    '他': '他',
-  }
-  for (const request of leaveRequests) {
-    const [reqYear, reqMonth, reqDay] = request.date.split('-').map(Number)
-    if (reqYear !== year || reqMonth !== month) continue
-    const dayIdx = reqDay - 1
-    if (dayIdx < 0 || dayIdx >= daysInMonth) continue
-    if (request.type === 'シフト希望') continue
-
-    const code = leaveCodeMap[request.type]
-    if (!code) continue
-
-    const current = grid[request.staff_id]?.[dayIdx]
-    if (current === undefined) continue
-
-    if (current === '') {
-      grid[request.staff_id][dayIdx] = code
-      freezeCell(request.staff_id, dayIdx)
-    } else if (isFrozen(request.staff_id, dayIdx)) {
-      // 前月持ち越しと希望休の矛盾を警告
-      warnings.push(`${dayIdx + 1}日: ${request.staff_id} の${request.type}は前月持ち越しと矛盾するため適用できません`)
-    }
-  }
-
-  // A-3: 定休日・祝日（hard のみ）
   for (const member of staff) {
     if (member.off_days_constraint !== 'hard') continue
     const offDow = new Set(member.off_days_of_week ?? [])
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (grid[member.id][dayIdx] !== '') continue
-      const date = dayMeta[dayIdx].date
-      const dow = date.getDay()
-      if (offDow.has(dow) || (member.off_on_holidays && HolidayJP.isHoliday(date))) {
+      const date = new Date(year, month - 1, dayIdx + 1)
+      if (offDow.has(date.getDay()) || (member.off_on_holidays && HolidayJP.isHoliday(date))) {
         grid[member.id][dayIdx] = '公'
-        freezeCell(member.id, dayIdx)
       }
     }
   }
-
-  // 詰み検出: 両シニアが同日に hard 定休で確定
-  if (seniorStaff.length >= 2) {
-    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-      const allFrozen = seniorStaff.every((m) =>
-        isFrozen(m.id, dayIdx) && grid[m.id][dayIdx] === '公'
-      )
-      if (allFrozen) {
-        warnings.push(`${dayIdx + 1}日: 全シニアがハード制約により公休のためカバー不可（要設定見直し）`)
-      }
-    }
-  }
-
-  // ========================================================
-  // Step B: 夜勤割り当て
-  // ========================================================
-  const nightCapable = staff.filter((m) => m.max_night_shifts > 0)
 
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const candidates = nightCapable.filter((m) => {
-      // 自セル
-      if (grid[m.id][dayIdx] !== '') return false
-      if ((nightCount.get(m.id) ?? 0) >= m.max_night_shifts) return false
-
-      // 前日制約
-      if (dayIdx > 0 && (grid[m.id][dayIdx - 1] === '夜' || grid[m.id][dayIdx - 1] === '明')) return false
-      if (dayIdx > 1 && grid[m.id][dayIdx - 2] === '夜') return false
-      if (countConsecutive(grid, m.id, dayIdx - 1) >= maxConsecutive) return false
-
-      // 翌日・翌々日: Step A 確定セルへの上書きを防ぐため '' のみ許可
-      if (dayIdx + 1 < daysInMonth && grid[m.id][dayIdx + 1] !== '') return false
-      if (dayIdx + 2 < daysInMonth && grid[m.id][dayIdx + 2] !== '') return false
-
-      // シニア先読み: dayIdx, dayIdx+1, dayIdx+2 すべてで他シニアがカバー可能か確認
-      if (isSeniorRole(m.role) && seniorStaff.length >= 2) {
-        for (const offset of [0, 1, 2]) {
-          const d = dayIdx + offset
-          if (d >= daysInMonth) continue
-          const otherCanCover = seniorStaff.some((senior) => {
-            if (senior.id === m.id) return false
-            if (grid[senior.id][d] !== '') return false
-            if (countConsecutive(grid, senior.id, d - 1) >= maxConsecutive) return false
-            if (hasDayMustNotPairOnDay(pairConstraints, grid, senior.id, d)) return false
-            return true
-          })
-          if (!otherCanCover) return false
-        }
-      }
-
-      return true
+    const { minNight } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
+    const assignedNightIds = new Set<string>()
+    staff.forEach((member) => {
+      if (grid[member.id][dayIdx] === '夜') assignedNightIds.add(member.id)
     })
 
-    // must_not_pair を考慮して選出
-    const assigned: string[] = []
-    for (const candidate of candidates) {
-      if (assigned.length >= minNight) break
-      const partners = mustNotPair.get(candidate.id)
-      if (partners && assigned.some((id) => partners.has(id))) continue
-      assigned.push(candidate.id)
-    }
+    const nightCandidates = [...staff]
+      .filter((member) => member.max_night_shifts > (nightCount.get(member.id) ?? 0))
+      .filter((member) => canAssignNight(grid, member.id, dayIdx, maxConsecutive))
+      .filter((member) =>
+        !pairConstraints.some((pair) => {
+          if (pair.constraint_type !== 'must_not_pair') return false
+          if (pair.shift_type_id !== null && pair.shift_type?.is_overnight === false) return false
+          const partnerId =
+            pair.staff_id_a === member.id ? pair.staff_id_b
+            : pair.staff_id_b === member.id ? pair.staff_id_a
+            : null
+          return partnerId !== null && assignedNightIds.has(partnerId)
+        }),
+      )
+      .sort((left, right) => (nightCount.get(left.id) ?? 0) - (nightCount.get(right.id) ?? 0))
 
-    for (const staffId of assigned) {
-      grid[staffId][dayIdx] = '夜'
-      freezeCell(staffId, dayIdx)
-      nightCount.set(staffId, (nightCount.get(staffId) ?? 0) + 1)
-      if (dayIdx + 1 < daysInMonth) {
-        grid[staffId][dayIdx + 1] = '明'
-        freezeCell(staffId, dayIdx + 1)
-      }
-      if (dayIdx + 2 < daysInMonth) {
-        grid[staffId][dayIdx + 2] = '公'
-        freezeCell(staffId, dayIdx + 2)
-      }
-    }
-
-    if (assigned.length < minNight) {
-      warnings.push(`${dayIdx + 1}日: 夜勤 最低${minNight}人に対し${assigned.length}人しか確保できません`)
-    }
-  }
-
-  // ========================================================
-  // Step C: シニア日勤を優先確保（負荷分散）
-  // ========================================================
-  if (seniorStaff.length > 0) {
-    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-      const { isWeekend } = dayMeta[dayIdx]
-      const max = isWeekend ? maxWeekend : 999
-
-      const hasSeniorDayShift = seniorStaff.some((m) => grid[m.id][dayIdx] === '日')
-      if (hasSeniorDayShift) continue
-
-      const dayCount = staff.filter((m) => grid[m.id][dayIdx] === '日').length
-      if (isWeekend && dayCount >= max) continue
-
-      const seniorCandidates = seniorStaff
-        .filter((m) => canAssignOpenDayShift(pairConstraints, grid, m.id, dayIdx, maxConsecutive))
-        .sort((a, b) => {
-          const consA = countConsecutive(grid, a.id, dayIdx - 1)
-          const consB = countConsecutive(grid, b.id, dayIdx - 1)
-          if (consA !== consB) return consA - consB
-          const dayA = grid[a.id].filter((c) => c === '日').length
-          const dayB = grid[b.id].filter((c) => c === '日').length
-          return dayA - dayB
-        })
-
-      if (seniorCandidates.length > 0) {
-        grid[seniorCandidates[0].id][dayIdx] = '日'
-      } else {
-        warnings.push(`${dayIdx + 1}日: 師長・主任の日勤を1人も確保できません`)
-      }
+    while (assignedNightIds.size < minNight && nightCandidates.length > 0) {
+      const candidate = nightCandidates.shift()
+      if (!candidate) break
+      assignedNightIds.add(candidate.id)
+      grid[candidate.id][dayIdx] = '夜'
+      nightCount.set(candidate.id, (nightCount.get(candidate.id) ?? 0) + 1)
+      if (dayIdx + 1 < daysInMonth) grid[candidate.id][dayIdx + 1] = '明'
+      if (dayIdx + 2 < daysInMonth && grid[candidate.id][dayIdx + 2] === '') grid[candidate.id][dayIdx + 2] = '公'
     }
   }
 
-  // ========================================================
-  // Step D: 一般日勤で最低人数を充足
-  // ========================================================
+  const seniorIds = new Set(staff.filter((member) => member.role === '師長' || member.role === '主任').map((member) => member.id))
+
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const { isWeekend } = dayMeta[dayIdx]
-    const target = isWeekend ? minWeekend : minDay
-    const max = isWeekend ? maxWeekend : 999
+    const { requiredDay, dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
 
-    let dayAssigned = staff.filter((m) => grid[m.id][dayIdx] === '日').length
+    if (!isWeekend && !staff.some((member) => seniorIds.has(member.id) && grid[member.id][dayIdx] === '日')) {
+      const seniorCandidate = staff
+        .filter((member) => seniorIds.has(member.id))
+        .find((member) => canAssignDay(grid, member.id, dayIdx, maxConsecutive))
+      if (seniorCandidate) grid[seniorCandidate.id][dayIdx] = '日'
+    }
 
-    if (dayAssigned < target) {
-      const candidates = staff.filter((m) => {
-        if (grid[m.id][dayIdx] !== '') return false
-        if (countConsecutive(grid, m.id, dayIdx - 1) >= maxConsecutive) return false
-        if (hasDayMustNotPairOnDay(pairConstraints, grid, m.id, dayIdx)) return false
-        return true
+    let dayCount = staff.filter((member) => grid[member.id][dayIdx] === '日').length
+    const dayCandidates = [...staff]
+      .filter((member) => canAssignDay(grid, member.id, dayIdx, maxConsecutive))
+      .sort((left, right) => {
+        const leftOffs = grid[left.id].filter(isOff).length
+        const rightOffs = grid[right.id].filter(isOff).length
+        return rightOffs - leftOffs
       })
-      for (const candidate of candidates) {
-        if (dayAssigned >= target) break
-        if (isWeekend && dayAssigned >= max) break
-        grid[candidate.id][dayIdx] = '日'
-        dayAssigned++
-      }
-    }
 
-    if (dayAssigned < target) {
-      warnings.push(`${dayIdx + 1}日: 日勤 最低${target}人に対し${dayAssigned}人しか確保できません`)
-    }
-
-    // 残りを公休に（frozenCells には入れない）
-    for (const member of staff) {
-      if (grid[member.id][dayIdx] === '') grid[member.id][dayIdx] = '公'
+    for (const candidate of dayCandidates) {
+      if (dayCount >= requiredDay || dayCount >= dayLimit) break
+      grid[candidate.id][dayIdx] = '日'
+      dayCount += 1
     }
   }
-
-  // ========================================================
-  // Step E: 休日数調整
-  // ========================================================
-  const offCodes: ShiftCode[] = ['公', '有', '他', '希休']
-  const isOffCode = (c: ShiftCode) => offCodes.includes(c)
 
   for (const member of staff) {
-    const offCount = grid[member.id].filter(isOffCode).length
-    const diff = offCount - targetOffDays
-
-    if (diff > 0) {
-      // 超過: 公休 → 日勤
-      let reduced = 0
-      for (let dayIdx = 0; dayIdx < daysInMonth && reduced < diff; dayIdx++) {
-        if (grid[member.id][dayIdx] !== '公') continue
-        if (isFrozen(member.id, dayIdx)) continue
-        if (dayMeta[dayIdx].isWeekend) continue
-        if (!canAssignDayShift(grid, member.id, dayIdx, maxConsecutive)) continue
-        if (hasDayMustNotPairOnDay(pairConstraints, grid, member.id, dayIdx)) continue
-        const dayCount = staff.filter((m) => grid[m.id][dayIdx] === '日').length
-        if (dayMeta[dayIdx].isWeekend && dayCount >= maxWeekend) continue
-        grid[member.id][dayIdx] = '日'
-        reduced++
-      }
-    } else if (diff < 0) {
-      // 不足: 日勤 → 公休
-      let added = 0
-      const needed = -diff
-      for (let dayIdx = 0; dayIdx < daysInMonth && added < needed; dayIdx++) {
-        if (grid[member.id][dayIdx] !== '日') continue
-        const dayCount = staff.filter((m) => grid[m.id][dayIdx] === '日').length
-        const { isWeekend } = dayMeta[dayIdx]
-        const minRequired = isWeekend ? minWeekend : minDay
-        if (dayCount <= minRequired) continue
-        if (isSeniorRole(member.role)) {
-          // シニアの場合、その日に他シニアが '日' でなければ変換禁止（公+公防止）
-          const otherSeniorOnDuty = seniorStaff.some((s) => s.id !== member.id && grid[s.id][dayIdx] === '日')
-          if (!otherSeniorOnDuty) continue
-        }
+    const target = targetOffDays + (paidLeaveCountByStaff.get(member.id) ?? 0)
+    let currentOffs = grid[member.id].filter(isOff).length
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      if (grid[member.id][dayIdx] !== '') continue
+      if (currentOffs < target) {
         grid[member.id][dayIdx] = '公'
-        added++
+        currentOffs += 1
+        continue
+      }
+
+      const { dayLimit } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
+      const currentDayCount = staff.filter((candidate) => grid[candidate.id][dayIdx] === '日').length
+      if (currentDayCount < dayLimit && canAssignDay(grid, member.id, dayIdx, maxConsecutive)) {
+        grid[member.id][dayIdx] = '日'
+      } else {
+        grid[member.id][dayIdx] = '公'
+        warnings.push(`${member.name}: ${dayIdx + 1}日は制約都合で公休に退避しました`)
       }
     }
   }
 
-  return { grid, warnings, targetOffDays }
+  let fallbackStatus: SolverOutput['solverStatus'] = 'success'
+  for (const pair of pairConstraints) {
+    if (pair.constraint_type !== 'must_pair') continue
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      const a = grid[pair.staff_id_a]?.[dayIdx]
+      const b = grid[pair.staff_id_b]?.[dayIdx]
+      if (a === undefined || b === undefined) continue
+      const violated =
+        pair.shift_type_id === null ? a !== b
+        : pair.shift_type?.is_overnight === true ? ((a === '夜') !== (b === '夜'))
+        : ((a === '日') !== (b === '日'))
+      if (violated) {
+        warnings.push(`必ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} を満たせませんでした`)
+        fallbackStatus = 'error'
+        break
+      }
+    }
+  }
+
+  return {
+    grid,
+    warnings,
+    targetOffDays,
+    solverStatus: fallbackStatus,
+  }
 }

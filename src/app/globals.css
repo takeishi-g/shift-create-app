@@ -128,3 +128,10 @@
     @apply font-sans;
   }
 }
+
+@media print {
+  nav, header, .no-print { display: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4 landscape; margin: 10mm; }
+  .sticky { position: relative !important; }
+}

@@ -100,11 +100,11 @@ export default function ConstraintsPage() {
 
       if (data) {
         const minPer = (data.min_staff_per_shift ?? {}) as Record<string, number>
-        setMinStaffing({
-          日勤: minPer['日勤'] ?? 3,
-          夜勤: minPer['夜勤'] ?? 2,
-        })
-        setMaxStaffing(data.max_staff_per_shift ?? {})
+        const minDay = minPer['日勤'] ?? 3
+        const minNight = minPer['夜勤'] ?? 2
+        setMinStaffing({ 日勤: minDay, 夜勤: minNight })
+        const maxPer = (data.max_staff_per_shift ?? {}) as Record<string, number>
+        setMaxStaffing({ 日勤: maxPer['日勤'] ?? minDay, 夜勤: maxPer['夜勤'] ?? minNight })
         setWorkRules({
           max_consecutive_work_days: data.max_consecutive_work_days ?? 5,
           min_rest_hours_after_night: data.min_rest_hours_after_night ?? 11,
@@ -119,7 +119,7 @@ export default function ConstraintsPage() {
       } else {
         // 未保存の月はデフォルト値にリセット
         setMinStaffing(INITIAL_MIN_STAFFING)
-        setMaxStaffing({})
+        setMaxStaffing({ 日勤: INITIAL_MIN_STAFFING.日勤, 夜勤: INITIAL_MIN_STAFFING.夜勤 })
         setWorkRules(INITIAL_WORK_RULES)
         setBathDays(INITIAL_BATH_DAYS)
         setConstraintId(null)

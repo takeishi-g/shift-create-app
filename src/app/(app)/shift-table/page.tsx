@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { getDaysInMonth, getDay, addMonths, startOfMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
+import { useReactToPrint } from 'react-to-print'
 import {
   Select,
   SelectContent,
@@ -11,9 +12,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { StaffProfile, deriveWorkHoursType } from '@/types'
+import { ConstraintSummary } from '@/components/features/constraints/ConstraintSummary'
 import { createClient } from '@/lib/supabase/client'
 
-type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | ''
+type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
 
 interface ShiftDef {
   code: string
@@ -30,6 +32,7 @@ const SHIFT_DEF: Record<Exclude<ShiftCode, ''>, ShiftDef> = {
   公: { code: '休', label: '公休',   bg: 'bg-red-100',     text: 'text-red-500',    ampm: 'off' },
   有: { code: '有', label: '有給',   bg: 'bg-teal-100',    text: 'text-teal-700',   ampm: 'off' },
   他: { code: '他', label: 'その他', bg: 'bg-pink-100',    text: 'text-pink-600',   ampm: 'off' },
+  希休: { code: '希休', label: '希望休', bg: 'bg-rose-200',   text: 'text-rose-700',   ampm: 'off' },
 }
 
 interface StaffRow {
@@ -92,6 +95,7 @@ function qualBadgeClass(s: StaffProfile) {
 
 export default function ShiftTablePage() {
   const supabase = createClient()
+  const printRef = useRef<HTMLDivElement>(null)
   const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [staffList, setStaffList] = useState<StaffProfile[]>([])
@@ -100,6 +104,7 @@ export default function ShiftTablePage() {
   const [carryOverMap, setCarryOverMap] = useState<Record<string, number>>({})
   const [shiftPrefMap, setShiftPrefMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const handlePrint = useReactToPrint({ contentRef: printRef, documentTitle: `シフト表_${selectedMonth}` })
 
   useEffect(() => {
     async function loadStaff() {
@@ -212,7 +217,7 @@ export default function ShiftTablePage() {
         staff,
         shifts,
         nightCount: shifts.filter((s) => s === '夜').length,
-        offCount: shifts.filter((s) => s === '公' || s === '有').length,
+        offCount: shifts.filter((s) => s === '公' || s === '有' || s === '希休').length,
         carryOver: carryOverMap[staff.id] ?? 0,
       }
     })
@@ -237,8 +242,8 @@ export default function ShiftTablePage() {
 
   return (
     <div className="space-y-4 p-4">
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between shrink-0 gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold text-gray-900">シフト表</h1>
           <Select value={selectedMonth} onValueChange={(v) => v && setSelectedMonth(v)}>
             <SelectTrigger className="w-[150px] bg-white border-gray-200 h-8 text-sm">
@@ -250,15 +255,22 @@ export default function ShiftTablePage() {
               ))}
             </SelectContent>
           </Select>
+          <ConstraintSummary yearMonth={selectedMonth} />
           {loading && <span className="text-xs text-gray-400">読み込み中...</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
+          <button onClick={handlePrint} className="px-4 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors">
             PDF出力
           </button>
         </div>
       </div>
 
+      <div ref={printRef}>
+        <div className="hidden print:flex items-center gap-3 mb-3 px-2">
+          <h1 className="text-base font-bold text-gray-900">シフト表</h1>
+          <span className="text-sm text-gray-600">{selectedMonth.replace('-', '年')}月</span>
+          <ConstraintSummary yearMonth={selectedMonth} />
+        </div>
       <div className="overflow-x-auto rounded-xl border border-rose-100 bg-white">
         <table className="border-collapse text-xs w-full" style={{ minWidth: 'max-content' }}>
           <thead>
@@ -380,6 +392,7 @@ export default function ShiftTablePage() {
             </tr>
           </tbody>
         </table>
+      </div>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap shrink-0 pb-1">
