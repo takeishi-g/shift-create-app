@@ -137,6 +137,7 @@ export default function ShiftEditPage() {
   const generateRequestIdRef = useRef(0)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
   const [shiftGrid, setShiftGrid] = useState<Record<string, ShiftCode[]>>({})
+  const [history, setHistory] = useState<Record<string, ShiftCode[]>[]>([])
   const [bathSet, setBathSet] = useState<Set<number>>(new Set())
   const [editCell, setEditCell] = useState<EditCell | null>(null)
   const [confirmed, setConfirmed] = useState(false)
@@ -463,7 +464,32 @@ export default function ShiftEditPage() {
     setEditCell({ staffId, dayIdx, x, y })
   }
 
+  function undo() {
+    setHistory(prev => {
+      const next = [...prev]
+      const snapshot = next.pop()
+      if (snapshot) setShiftGrid(snapshot)
+      return next
+    })
+  }
+
+  // Ctrl+Z（Mac: Cmd+Z）でアンドゥ。input/textarea フォーカス中は無効
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMeta = e.metaKey || e.ctrlKey
+      if (!isMeta || e.key !== 'z') return
+      const tag = (e.target as HTMLElement).tagName.toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
+      e.preventDefault()
+      undo()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   function setShift(staffId: string, dayIdx: number, code: ShiftCode) {
+    // アンドゥ用スナップショットを保存（最大30件）
+    setHistory(prev => [...prev.slice(-29), shiftGrid])
     setShiftGrid(prev => {
       const row = [...(prev[staffId] ?? [])]
       const prevCode = row[dayIdx]
@@ -818,6 +844,14 @@ export default function ShiftEditPage() {
           <ConstraintSummary yearMonth={selectedMonth} />
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={undo}
+            disabled={history.length === 0}
+            title="セッション中のみ有効（リロードで履歴消去）"
+            className="px-4 py-1.5 text-xs font-semibold text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            一つ前に戻す
+          </button>
           <button
             onClick={handleReset}
             className="px-4 py-1.5 text-xs font-semibold text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
