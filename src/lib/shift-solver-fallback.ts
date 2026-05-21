@@ -1,6 +1,7 @@
 import { getDaysInMonth } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
 import type { ShiftCode, ShiftGrid, SolverInput, SolverOutput } from './shift-solver'
+import { pairTargetsNight, pairTargetsDay } from './shift-solver-csp'
 
 function emptyGrid(staff: SolverInput['staff'], daysInMonth: number): ShiftGrid {
   return Object.fromEntries(
@@ -156,8 +157,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
       .filter((member) => canAssignNight(grid, member.id, dayIdx, maxConsecutive))
       .filter((member) =>
         !pairConstraints.some((pair) => {
-          if (pair.constraint_type !== 'must_not_pair') return false
-          if (pair.shift_type_id !== null && pair.shift_type?.is_overnight === false) return false
+          if (pair.constraint_type !== 'must_not_pair' || !pairTargetsNight(pair)) return false
           const partnerId =
             pair.staff_id_a === member.id ? pair.staff_id_b
             : pair.staff_id_b === member.id ? pair.staff_id_a
@@ -170,6 +170,15 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
     while (assignedNightIds.size < minNight && nightCandidates.length > 0) {
       const candidate = nightCandidates.shift()
       if (!candidate) break
+      const hasNightPairViolation = pairConstraints.some((pair) => {
+        if (pair.constraint_type !== 'must_not_pair' || !pairTargetsNight(pair)) return false
+        const partnerId =
+          pair.staff_id_a === candidate.id ? pair.staff_id_b
+          : pair.staff_id_b === candidate.id ? pair.staff_id_a
+          : null
+        return partnerId !== null && assignedNightIds.has(partnerId)
+      })
+      if (hasNightPairViolation) continue
       assignedNightIds.add(candidate.id)
       grid[candidate.id][dayIdx] = '夜'
       nightCount.set(candidate.id, (nightCount.get(candidate.id) ?? 0) + 1)
@@ -188,9 +197,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
     )
     const isDayPairViolation = (memberId: string) =>
       pairConstraints.some((pair) => {
-        if (pair.constraint_type !== 'must_not_pair') return false
-        if (pair.shift_type_id !== null && pair.shift_type == null) return false
-        if (pair.shift_type_id !== null && pair.shift_type?.is_overnight === true) return false
+        if (pair.constraint_type !== 'must_not_pair' || !pairTargetsDay(pair)) return false
         const partnerId =
           pair.staff_id_a === memberId ? pair.staff_id_b
           : pair.staff_id_b === memberId ? pair.staff_id_a
@@ -241,11 +248,23 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
       const { dayLimit } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
       const currentDayCount = staff.filter((candidate) => grid[candidate.id][dayIdx] === '日').length
-      if (currentDayCount < dayLimit && canAssignDay(grid, member.id, dayIdx, maxConsecutive)) {
+      const hasFillDayPairViolation = pairConstraints.some((pair) => {
+        if (pair.constraint_type !== 'must_not_pair' || !pairTargetsDay(pair)) return false
+        const partnerId =
+          pair.staff_id_a === member.id ? pair.staff_id_b
+          : pair.staff_id_b === member.id ? pair.staff_id_a
+          : null
+        return partnerId !== null && grid[partnerId]?.[dayIdx] === '日'
+      })
+      if (currentDayCount < dayLimit && canAssignDay(grid, member.id, dayIdx, maxConsecutive) && !hasFillDayPairViolation) {
         grid[member.id][dayIdx] = '日'
       } else {
         grid[member.id][dayIdx] = '公'
-        warnings.push(`${member.name}: ${dayIdx + 1}日は制約都合で公休に退避しました`)
+        if (hasFillDayPairViolation) {
+          warnings.push(`${member.name}: ${dayIdx + 1}日はペア制約のため公休に退避しました`)
+        } else {
+          warnings.push(`${member.name}: ${dayIdx + 1}日は制約都合で公休に退避しました`)
+        }
       }
     }
   }

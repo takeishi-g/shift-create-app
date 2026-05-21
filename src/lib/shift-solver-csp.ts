@@ -179,11 +179,11 @@ function buildDayMeta(year: number, month: number, daysInMonth: number, bathDayI
   })
 }
 
-function pairTargetsNight(pair: StaffPairConstraint): boolean {
+export function pairTargetsNight(pair: StaffPairConstraint): boolean {
   return pair.shift_type_id === null || pair.shift_type?.is_overnight === true
 }
 
-function pairTargetsDay(pair: StaffPairConstraint): boolean {
+export function pairTargetsDay(pair: StaffPairConstraint): boolean {
   return pair.shift_type_id === null || pair.shift_type?.is_overnight === false
 }
 
