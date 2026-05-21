@@ -183,16 +183,36 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
     const { requiredDay, dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
 
+    const assignedDayIds = new Set(
+      staff.filter((s) => grid[s.id][dayIdx] === '日').map((s) => s.id),
+    )
+    const isDayPairViolation = (memberId: string) =>
+      pairConstraints.some((pair) => {
+        if (pair.constraint_type !== 'must_not_pair') return false
+        if (pair.shift_type_id !== null && pair.shift_type == null) return false
+        if (pair.shift_type_id !== null && pair.shift_type?.is_overnight === true) return false
+        const partnerId =
+          pair.staff_id_a === memberId ? pair.staff_id_b
+          : pair.staff_id_b === memberId ? pair.staff_id_a
+          : null
+        return partnerId !== null && assignedDayIds.has(partnerId)
+      })
+
     if (!isWeekend && !staff.some((member) => seniorIds.has(member.id) && grid[member.id][dayIdx] === '日')) {
       const seniorCandidate = staff
         .filter((member) => seniorIds.has(member.id))
+        .filter((member) => !isDayPairViolation(member.id))
         .find((member) => canAssignDay(grid, member.id, dayIdx, maxConsecutive))
-      if (seniorCandidate) grid[seniorCandidate.id][dayIdx] = '日'
+      if (seniorCandidate) {
+        grid[seniorCandidate.id][dayIdx] = '日'
+        assignedDayIds.add(seniorCandidate.id)
+      }
     }
 
-    let dayCount = staff.filter((member) => grid[member.id][dayIdx] === '日').length
+    let dayCount = assignedDayIds.size
     const dayCandidates = [...staff]
       .filter((member) => canAssignDay(grid, member.id, dayIdx, maxConsecutive))
+      .filter((member) => !isDayPairViolation(member.id))
       .sort((left, right) => {
         const leftOffs = grid[left.id].filter(isOff).length
         const rightOffs = grid[right.id].filter(isOff).length
@@ -201,7 +221,9 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
     for (const candidate of dayCandidates) {
       if (dayCount >= requiredDay || dayCount >= dayLimit) break
+      if (isDayPairViolation(candidate.id)) continue
       grid[candidate.id][dayIdx] = '日'
+      assignedDayIds.add(candidate.id)
       dayCount += 1
     }
   }
