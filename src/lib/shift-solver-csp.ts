@@ -404,7 +404,19 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   const { minNight, maxNight, requiredDayByIndex, maxDayByIndex } = getShiftMinimums(constraints, shiftTypes, dayMeta)
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
   const personalTargetByStaff = new Map<string, number>(
-    staff.map((member) => [member.id, targetOffDays + (paidLeaveCount.get(member.id) ?? 0)]),
+    staff.map((member) => {
+      const paidLeaves = paidLeaveCount.get(member.id) ?? 0
+      if (!member.allow_extra_off_days) {
+        const memberOffDow = new Set(member.off_days_of_week ?? [])
+        const definedOffCount = Array.from({ length: daysInMonth }, (_, dayIdx) => {
+          const date = new Date(year, month - 1, dayIdx + 1)
+          const isHoliday = HolidayJP.isHoliday(date)
+          return memberOffDow.has(date.getDay()) || (member.off_on_holidays && isHoliday)
+        }).filter(Boolean).length
+        return [member.id, definedOffCount + paidLeaves]
+      }
+      return [member.id, targetOffDays + paidLeaves]
+    }),
   )
 
   let glpk: GLPK
@@ -502,8 +514,12 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       if (pref === 'night') addRow(`pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (pref === 'day') addRow(`pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
+      const isDefinedOffDay = offDow.has(date.getDay()) || (member.off_on_holidays && isHoliday)
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
+      } else if (!member.allow_extra_off_days && !isDefinedOffDay && member.max_night_shifts === 0) {
+        // 定休日以外に公休を入れない（夜勤なしスタッフのみ。夜勤ありは post_night_off と矛盾するため除外）
+        addRow(`no_extra_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 0, 0)
       }
 
       if (dayIdx === 0) {
