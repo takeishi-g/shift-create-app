@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { getDaysInMonth, getDay } from 'date-fns'
 import { generateShifts } from '@/lib/shift-solver'
 import { generateShiftsFallback } from '@/lib/shift-solver-fallback'
+import { validateAndFixPairConstraints } from '@/lib/shift-validator'
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
@@ -133,6 +134,15 @@ export async function POST(request: Request) {
     resultStatus = fallback.solverStatus
     fallbackUsed = true
   }
+
+  // ポスト処理: CSP/フォールバック後に must_not_pair 違反を検出・修正
+  validateAndFixPairConstraints(
+    grid,
+    solverInput.pairConstraints,
+    solverInput.staff,
+    warnings,
+    solverInput.constraints?.max_consecutive_work_days ?? 5,
+  )
 
   return NextResponse.json({
     grid,
