@@ -130,7 +130,7 @@ interface EditCell {
 }
 
 export default function ShiftEditPage() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const selectedMonthRef = useRef(TODAY_MONTH)
