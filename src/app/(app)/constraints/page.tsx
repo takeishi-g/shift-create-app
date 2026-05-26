@@ -251,7 +251,7 @@ export default function ConstraintsPage() {
           ))}
         </div>
 
-        {/* 土日・お風呂の日 */}
+        {/* 土日祝・お風呂の日 */}
         <div className="border-t border-gray-100 pt-4 space-y-4">
           <div className="grid grid-cols-2 gap-x-8 gap-y-4">
             <div className="flex items-center gap-2">
@@ -265,7 +265,7 @@ export default function ConstraintsPage() {
               <span className="text-sm text-gray-500">日</span>
             </div>
             <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">土日人数</Label>
+              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝最低</Label>
               <Input
                 type="number" min={0} max={20}
                 value={workRules.min_staff_weekend}
@@ -275,7 +275,7 @@ export default function ConstraintsPage() {
               <span className="text-sm text-gray-500">人</span>
             </div>
             <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝上限人数</Label>
+              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝最高</Label>
               <Input
                 type="number" min={0} max={20}
                 value={workRules.max_staff_weekend}
