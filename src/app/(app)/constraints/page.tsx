@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { format, addMonths } from 'date-fns'
 import { ja } from 'date-fns/locale'
-import { Plus, X, CheckCircle2, XCircle } from 'lucide-react'
+import { Plus, X, CheckCircle2, XCircle, CalendarDays, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,6 +49,11 @@ const PAIR_TYPE_CONFIG: Record<PairConstraintType, { label: string; icon: React.
     label: 'ペア禁止',
     icon: <XCircle className="h-4 w-4 text-red-400 shrink-0" />,
     className: 'border-red-200 bg-red-50',
+  },
+  senior_pair: {
+    label: 'シニアペア',
+    icon: <Shield className="h-4 w-4 text-blue-500 shrink-0" />,
+    className: 'border-blue-200 bg-blue-50',
   },
 }
 
@@ -225,6 +230,22 @@ export default function ConstraintsPage() {
         {loading && <span className="text-xs text-gray-400 ml-1">読み込み中...</span>}
       </div>
 
+      {/* 月間休日数 */}
+      <section className="rounded-xl border border-rose-100 bg-white p-5">
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-rose-400 shrink-0" />
+          <h2 className="text-sm font-semibold text-gray-700">月間休日数</h2>
+          <span className="text-xs text-gray-400">（1人あたりの目標）</span>
+          <Input
+            type="number" min={0} max={20}
+            value={workRules.target_off_days}
+            onChange={(e) => setWorkRulesField('target_off_days', Number(e.target.value))}
+            className="w-16 text-center"
+          />
+          <span className="text-sm text-gray-500">日</span>
+        </div>
+      </section>
+
       {/* 配置人数（最低・最高） */}
       <section className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
         <h2 className="text-sm font-semibold text-gray-700">配置人数（最低・最高）</h2>
@@ -249,53 +270,29 @@ export default function ConstraintsPage() {
               <span className="text-xs text-gray-400">人</span>
             </div>
           ))}
+          <div className="flex items-center gap-2">
+            <Label className="w-14 text-sm text-gray-600 shrink-0">土日祝</Label>
+            <label className="text-xs text-gray-500">最低</label>
+            <Input
+              type="number" min={0} max={20}
+              value={workRules.min_staff_weekend}
+              onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
+              className="w-16 text-center"
+            />
+            <label className="text-xs text-gray-500">最高</label>
+            <Input
+              type="number" min={workRules.min_staff_weekend ?? 0} max={20}
+              value={workRules.max_staff_weekend}
+              onChange={(e) => setWorkRulesField('max_staff_weekend', Number(e.target.value))}
+              className="w-16 text-center"
+            />
+            <span className="text-xs text-gray-400">人</span>
+          </div>
         </div>
 
-        {/* 土日祝・お風呂の日 */}
+        {/* お風呂の日 */}
         <div className="border-t border-gray-100 pt-4 space-y-4">
-          <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-            <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">月間休日数</Label>
-              <Input
-                type="number" min={0} max={20}
-                value={workRules.target_off_days}
-                onChange={(e) => setWorkRulesField('target_off_days', Number(e.target.value))}
-                className="w-16 text-center"
-              />
-              <span className="text-sm text-gray-500">日</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝最低</Label>
-              <Input
-                type="number" min={0} max={20}
-                value={workRules.min_staff_weekend}
-                onChange={(e) => setWorkRulesField('min_staff_weekend', Number(e.target.value))}
-                className="w-16 text-center"
-              />
-              <span className="text-sm text-gray-500">人</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">土日祝最高</Label>
-              <Input
-                type="number" min={0} max={20}
-                value={workRules.max_staff_weekend}
-                onChange={(e) => setWorkRulesField('max_staff_weekend', Number(e.target.value))}
-                className="w-16 text-center"
-              />
-              <span className="text-sm text-gray-500">人</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の日人数</Label>
-              <Input
-                type="number" min={0} max={20}
-                value={workRules.min_staff_bath_day}
-                onChange={(e) => setWorkRulesField('min_staff_bath_day', Number(e.target.value))}
-                className="w-16 text-center"
-              />
-              <span className="text-sm text-gray-500">人</span>
-            </div>
-          </div>
-          {/* お風呂の曜日 */}
+          {/* お風呂の曜日 + 人数 */}
           <div className="flex items-center gap-4">
             <Label className="w-24 text-sm text-gray-600 shrink-0">お風呂の曜日</Label>
             <div className="flex gap-2">
@@ -314,6 +311,16 @@ export default function ConstraintsPage() {
                   />
                 </label>
               ))}
+            </div>
+            <div className="flex items-center gap-2 ml-4">
+              <label className="text-sm text-gray-600">最低人数</label>
+              <Input
+                type="number" min={0} max={20}
+                value={workRules.min_staff_bath_day}
+                onChange={(e) => setWorkRulesField('min_staff_bath_day', Number(e.target.value))}
+                className="w-16 text-center"
+              />
+              <span className="text-sm text-gray-500">人</span>
             </div>
           </div>
         </div>

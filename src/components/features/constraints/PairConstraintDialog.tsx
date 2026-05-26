@@ -21,6 +21,7 @@ import {
 const CONSTRAINT_TYPE_LABEL: Record<string, string> = {
   must_pair:     '必ペア（同じシフトに入れる）',
   must_not_pair: 'ペア禁止（同じシフトに入れない）',
+  senior_pair:   'シニアペア（平日日勤確保）',
 }
 
 export interface PairConstraintFormData {
@@ -87,34 +88,40 @@ export function PairConstraintDialog({
               <SelectContent>
                 <SelectItem value="must_pair">必ペア（同じシフトに入れる）</SelectItem>
                 <SelectItem value="must_not_pair">ペア禁止（同じシフトに入れない）</SelectItem>
+                <SelectItem value="senior_pair">シニアペア（平日日勤確保）</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* 対象シフト */}
-          <div className="space-y-1.5">
-            <Label>対象シフト</Label>
-            <Select
-              value={form.shift_type_id}
-              onValueChange={(v) => v && setForm({ ...form, shift_type_id: v })}
-            >
-              <SelectTrigger>
-                <span>
-                  {form.shift_type_id === 'all'
-                    ? 'すべて'
-                    : shiftTypes.find((st) => st.id === form.shift_type_id)?.name ?? 'すべて'}
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">すべて</SelectItem>
-                {shiftTypes
-                  .filter((st) => !st.is_off)
-                  .map((st) => (
-                    <SelectItem key={st.id} value={st.id}>{st.name}</SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* 対象シフト（senior_pair は日勤固定のため非表示） */}
+          {form.constraint_type !== 'senior_pair' && (
+            <div className="space-y-1.5">
+              <Label>対象シフト</Label>
+              <Select
+                value={form.shift_type_id}
+                onValueChange={(v) => v && setForm({ ...form, shift_type_id: v })}
+              >
+                <SelectTrigger>
+                  <span>
+                    {form.shift_type_id === 'all'
+                      ? 'すべて'
+                      : shiftTypes.find((st) => st.id === form.shift_type_id)?.name ?? 'すべて'}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">すべて</SelectItem>
+                  {shiftTypes
+                    .filter((st) => !st.is_off)
+                    .map((st) => (
+                      <SelectItem key={st.id} value={st.id}>{st.name}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {form.constraint_type === 'senior_pair' && (
+            <p className="text-xs text-gray-500">平日（土日・祝日を除く）は、指定した2名のどちらか1人以上が必ず日勤に入ります。</p>
+          )}
 
           {/* スタッフ A */}
           <div className="space-y-1.5">

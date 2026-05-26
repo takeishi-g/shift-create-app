@@ -677,6 +677,23 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   }
 
   for (const pair of pairConstraints) {
+    if (pair.constraint_type === 'senior_pair') {
+      for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+        if (dayMeta[dayIdx].isWeekend) continue
+        addRow(
+          `senior_pair__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
+          [
+            { name: varName('w', pair.staff_id_a, dayIdx), coef: 1 },
+            { name: varName('w', pair.staff_id_b, dayIdx), coef: 1 },
+          ],
+          glpk.GLP_LO,
+          1,
+          0,
+        )
+      }
+      continue
+    }
+
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (pair.constraint_type === 'must_not_pair') {
         if (pairTargetsNight(pair)) {

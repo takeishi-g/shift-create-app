@@ -97,7 +97,7 @@ export interface ShiftConstraints {
 // =============================
 // ペア制約
 // =============================
-export type PairConstraintType = 'must_pair' | 'must_not_pair'
+export type PairConstraintType = 'must_pair' | 'must_not_pair' | 'senior_pair'
 
 export interface StaffPairConstraint {
   id: string
