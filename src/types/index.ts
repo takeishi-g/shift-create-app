@@ -79,9 +79,9 @@ export interface ShiftConstraints {
   min_staff_per_shift: Record<string, number>
   /** シフト種別IDごとの最高配置人数 */
   max_staff_per_shift: Record<string, number>
-  /** 土日の最低配置人数 */
+  /** 土日祝の最低配置人数 */
   min_staff_weekend: number
-  /** 土日の上限配置人数 */
+  /** 土日祝の最高配置人数 */
   max_staff_weekend: number
   /** お風呂の日の最低配置人数 */
   min_staff_bath_day: number

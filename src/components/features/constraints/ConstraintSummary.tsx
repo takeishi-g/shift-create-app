@@ -56,7 +56,7 @@ export function ConstraintSummary({ yearMonth }: Props) {
   const items: { label: string; value: string; hint: string }[] = [
     { label: '日勤', value: data.maxDay != null ? `${data.minDay}〜${data.maxDay}人` : `${data.minDay}人〜`, hint: '配置人数範囲' },
     { label: '夜勤', value: `${data.minNight}人`, hint: '最低配置' },
-    { label: '土日', value: `${data.minWeekend}人`, hint: '最低配置' },
+    { label: '土日祝最低', value: `${data.minWeekend}人`, hint: '最低配置' },
     { label: '風呂', value: `${data.minBathDay}人`, hint: '最低配置' },
     { label: '休日', value: `${data.targetOffDays}日`, hint: '月間目標休日数' },
   ]
