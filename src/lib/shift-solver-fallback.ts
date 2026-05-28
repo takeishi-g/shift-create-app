@@ -133,12 +133,11 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   }
 
   for (const member of staff) {
-    if (member.off_days_constraint !== 'hard') continue
-    const offDow = new Set(member.off_days_of_week ?? [])
+    const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (grid[member.id][dayIdx] !== '') continue
       const date = new Date(year, month - 1, dayIdx + 1)
-      if (offDow.has(date.getDay()) || (member.off_on_holidays && HolidayJP.isHoliday(date))) {
+      if (hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && HolidayJP.isHoliday(date))) {
         grid[member.id][dayIdx] = '公'
       }
     }

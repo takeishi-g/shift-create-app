@@ -29,16 +29,17 @@ interface StaffFormData {
   work_end_time: string
   experience_years: number
   max_night_shifts: number
-  off_days_of_week: number[]
-  off_on_holidays: boolean
-  off_days_constraint: 'hard' | 'soft'
+  hard_off_days_of_week: number[]
+  soft_off_days_of_week: number[]
+  hard_off_on_holidays: boolean
+  soft_off_on_holidays: boolean
   allow_extra_off_days: boolean
 }
 
 interface StaffFormDialogProps {
   open: boolean
   onClose: () => void
-  onSubmit: (data: StaffFormData) => void
+  onSubmit: (data: StaffFormData) => Promise<void>
   initialData?: Partial<StaffProfile> | null
 }
 
@@ -52,9 +53,10 @@ const defaultForm: StaffFormData = {
   work_end_time: '17:00',
   experience_years: 0,
   max_night_shifts: 8,
-  off_days_of_week: [],
-  off_on_holidays: false,
-  off_days_constraint: 'hard',
+  hard_off_days_of_week: [],
+  soft_off_days_of_week: [],
+  hard_off_on_holidays: false,
+  soft_off_on_holidays: false,
   allow_extra_off_days: true,
 }
 
@@ -76,10 +78,12 @@ export function StaffFormDialog({
   initialData,
 }: StaffFormDialogProps) {
   const [form, setForm] = useState<StaffFormData>(defaultForm)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const isEdit = !!initialData?.id
 
   useEffect(() => {
     if (open) {
+      setSubmitError(null)
       if (initialData) {
         setForm({
           name: initialData.name ?? '',
@@ -89,9 +93,10 @@ export function StaffFormDialog({
           work_end_time: initialData.work_end_time ?? '17:00',
           experience_years: initialData.experience_years ?? 0,
           max_night_shifts: initialData.max_night_shifts ?? 8,
-          off_days_of_week: initialData.off_days_of_week ?? [],
-          off_on_holidays: initialData.off_on_holidays ?? false,
-          off_days_constraint: initialData.off_days_constraint ?? 'hard',
+          hard_off_days_of_week: initialData.hard_off_days_of_week ?? [],
+          soft_off_days_of_week: initialData.soft_off_days_of_week ?? [],
+          hard_off_on_holidays: initialData.hard_off_on_holidays ?? false,
+          soft_off_on_holidays: initialData.soft_off_on_holidays ?? false,
           allow_extra_off_days: initialData.allow_extra_off_days ?? true,
         })
       } else {
@@ -100,10 +105,15 @@ export function StaffFormDialog({
     }
   }, [open, initialData])
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
-    onSubmit(form)
+    setSubmitError(null)
+    try {
+      await onSubmit(form)
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : '保存に失敗しました')
+    }
   }
 
   return (
@@ -180,59 +190,81 @@ export function StaffFormDialog({
             </div>
           </div>
 
-          {/* 定休曜日・祝日 */}
-          <div className="space-y-1.5">
+          {/* 定休日 */}
+          <div className="space-y-2">
             <Label>定休日</Label>
-            <div className="flex items-end gap-3">
-              <div className="flex gap-2">
-                {DOW_LABELS.map((label, dow) => (
-                  <label key={dow} className="flex flex-col items-center gap-1 cursor-pointer">
-                    <span className={`text-xs font-medium ${dow === 0 ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-gray-500'}`}>
-                      {label}
-                    </span>
-                    <Checkbox
-                      checked={form.off_days_of_week.includes(dow)}
-                      onCheckedChange={(checked) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          off_days_of_week: checked
-                            ? [...prev.off_days_of_week, dow].sort()
-                            : prev.off_days_of_week.filter((d) => d !== dow),
-                        }))
-                      }
-                    />
-                  </label>
-                ))}
+            {/* hard 行 */}
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-gray-500">hard</span>
+              <div className="flex items-end gap-3">
+                <div className="flex gap-2">
+                  {DOW_LABELS.map((label, dow) => (
+                    <label key={dow} className="flex flex-col items-center gap-1 cursor-pointer">
+                      <span className={`text-xs font-medium ${dow === 0 ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-gray-500'}`}>
+                        {label}
+                      </span>
+                      <Checkbox
+                        checked={form.hard_off_days_of_week.includes(dow)}
+                        onCheckedChange={(checked) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            hard_off_days_of_week: checked
+                              ? [...prev.hard_off_days_of_week, dow].sort()
+                              : prev.hard_off_days_of_week.filter((d) => d !== dow),
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="w-px h-6 bg-gray-200 self-center" />
+                <label className="flex flex-col items-center gap-1 cursor-pointer">
+                  <span className="text-xs font-medium text-rose-400">祝日</span>
+                  <Checkbox
+                    checked={form.hard_off_on_holidays}
+                    onCheckedChange={(checked) =>
+                      setForm((prev) => ({ ...prev, hard_off_on_holidays: !!checked }))
+                    }
+                  />
+                </label>
               </div>
-              <div className="w-px h-6 bg-gray-200 self-center" />
-              <label className="flex flex-col items-center gap-1 cursor-pointer">
-                <span className="text-xs font-medium text-rose-400">祝日</span>
-                <Checkbox
-                  checked={form.off_on_holidays}
-                  onCheckedChange={(checked) =>
-                    setForm((prev) => ({ ...prev, off_on_holidays: !!checked }))
-                  }
-                />
-              </label>
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>定休日制約</Label>
-            <Select
-              value={form.off_days_constraint}
-              onValueChange={(value) =>
-                value && setForm({ ...form, off_days_constraint: value as 'hard' | 'soft' })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hard">ハード（変更不可）</SelectItem>
-                <SelectItem value="soft">ソフト（必要時に変更可）</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* soft 行 */}
+            <div className="space-y-1">
+              <span className="text-xs font-semibold text-gray-500">soft</span>
+              <div className="flex items-end gap-3">
+                <div className="flex gap-2">
+                  {DOW_LABELS.map((label, dow) => (
+                    <label key={dow} className="flex flex-col items-center gap-1 cursor-pointer">
+                      <span className={`text-xs font-medium ${dow === 0 ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-gray-500'}`}>
+                        {label}
+                      </span>
+                      <Checkbox
+                        checked={form.soft_off_days_of_week.includes(dow)}
+                        onCheckedChange={(checked) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            soft_off_days_of_week: checked
+                              ? [...prev.soft_off_days_of_week, dow].sort()
+                              : prev.soft_off_days_of_week.filter((d) => d !== dow),
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="w-px h-6 bg-gray-200 self-center" />
+                <label className="flex flex-col items-center gap-1 cursor-pointer">
+                  <span className="text-xs font-medium text-rose-400">祝日</span>
+                  <Checkbox
+                    checked={form.soft_off_on_holidays}
+                    onCheckedChange={(checked) =>
+                      setForm((prev) => ({ ...prev, soft_off_on_holidays: !!checked }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 pt-1">
@@ -279,6 +311,9 @@ export function StaffFormDialog({
             </div>
           </div>
 
+          {submitError && (
+            <p className="text-sm text-red-500">{submitError}</p>
+          )}
           <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={onClose}>
               キャンセル

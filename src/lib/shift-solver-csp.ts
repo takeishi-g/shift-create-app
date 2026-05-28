@@ -407,11 +407,17 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     staff.map((member) => {
       const paidLeaves = paidLeaveCount.get(member.id) ?? 0
       if (!member.allow_extra_off_days) {
-        const memberOffDow = new Set(member.off_days_of_week ?? [])
+        const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+        const softOffDow = new Set(member.soft_off_days_of_week ?? [])
         const definedOffCount = Array.from({ length: daysInMonth }, (_, dayIdx) => {
           const date = new Date(year, month - 1, dayIdx + 1)
           const isHoliday = HolidayJP.isHoliday(date)
-          return memberOffDow.has(date.getDay()) || (member.off_on_holidays && isHoliday)
+          return (
+            hardOffDow.has(date.getDay()) ||
+            softOffDow.has(date.getDay()) ||
+            (member.hard_off_on_holidays && isHoliday) ||
+            (member.soft_off_on_holidays && isHoliday)
+          )
         }).filter(Boolean).length
         return [member.id, definedOffCount + paidLeaves]
       }
@@ -483,7 +489,8 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     const memberForcedAke = forcedAkeDays.get(member.id) ?? new Set<number>()
     const memberFixedOff = fixedOffDays.get(member.id) ?? new Set<number>()
     const carryInWork = carryInWorkDays.get(member.id) ?? 0
-    const offDow = new Set(member.off_days_of_week ?? [])
+    const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+    const softOffDow = new Set(member.soft_off_days_of_week ?? [])
 
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       const n = varName('n', member.id, dayIdx)
@@ -508,15 +515,25 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       const isHoliday = HolidayJP.isHoliday(date)
       const pref = memberPrefs?.get(dayIdx)
       const isHardOffDay =
-        member.off_days_constraint === 'hard' &&
-        (offDow.has(date.getDay()) || (member.off_on_holidays && isHoliday))
+        hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && isHoliday)
+      const isSoftOffDay =
+        !isHardOffDay &&
+        (softOffDow.has(date.getDay()) || (member.soft_off_on_holidays && isHoliday))
 
       if (pref === 'night') addRow(`pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (pref === 'day') addRow(`pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
-      const isDefinedOffDay = offDow.has(date.getDay()) || (member.off_on_holidays && isHoliday)
+      const isDefinedOffDay =
+        hardOffDow.has(date.getDay()) ||
+        softOffDow.has(date.getDay()) ||
+        (member.hard_off_on_holidays && isHoliday) ||
+        (member.soft_off_on_holidays && isHoliday)
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
+      } else if (isSoftOffDay) {
+        // soft定休日: 出勤時にペナルティ（強制ではないが優先的に休みを入れる）
+        addObjective(varName('n', member.id, dayIdx), 3)
+        addObjective(varName('w', member.id, dayIdx), 3)
       } else if (!member.allow_extra_off_days && !isDefinedOffDay && member.max_night_shifts === 0) {
         // 定休日以外に公休を入れない（夜勤なしスタッフのみ。夜勤ありは post_night_off と矛盾するため除外）
         addRow(`no_extra_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 0, 0)

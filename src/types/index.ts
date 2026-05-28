@@ -19,12 +19,14 @@ export interface StaffProfile {
   work_end_time: string
   max_night_shifts: number
   experience_years: number
-  /** 定休曜日（0=日〜6=土）の配列 */
-  off_days_of_week: number[]
-  /** 祝日を定休にするか */
-  off_on_holidays: boolean
-  /** 定休日制約の強さ */
-  off_days_constraint: 'hard' | 'soft'
+  /** hard制約の定休曜日（0=日〜6=土）- シフト不可 */
+  hard_off_days_of_week: number[]
+  /** soft制約の定休曜日（0=日〜6=土）- できれば休み */
+  soft_off_days_of_week: number[]
+  /** hard制約: 祝日を定休にするか */
+  hard_off_on_holidays: boolean
+  /** soft制約: 祝日を定休にするか */
+  soft_off_on_holidays: boolean
   /** 定休日以外に公休を入れるか（false の場合、定休日のみ休日、目標休日数への追加配分なし） */
   allow_extra_off_days: boolean
   is_active: boolean

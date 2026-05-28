@@ -37,11 +37,6 @@ const ROLE_STYLE: Record<string, string> = {
   一般: 'bg-gray-100 text-gray-500',
 }
 
-const OFF_CONSTRAINT_STYLE: Record<StaffProfile['off_days_constraint'], string> = {
-  hard: 'bg-rose-100 text-rose-700',
-  soft: 'bg-amber-100 text-amber-700',
-}
-
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'] as const
 
 interface StaffRowProps {
@@ -100,26 +95,34 @@ function SortableStaffRow({ s, onEdit, onDelete }: StaffRowProps) {
       </TableCell>
       <TableCell className="px-4 text-gray-700 text-sm">{s.max_night_shifts}回</TableCell>
       <TableCell className="px-4">
-        {s.off_days_of_week.length > 0 || s.off_on_holidays ? (
+        {(s.hard_off_days_of_week ?? []).length > 0 || (s.soft_off_days_of_week ?? []).length > 0 || s.hard_off_on_holidays || s.soft_off_on_holidays ? (
           <div className="flex flex-wrap gap-1.5">
-            {s.off_days_of_week.map((day) => (
+            {(s.hard_off_days_of_week ?? []).map((day) => (
               <Badge
-                key={`${s.id}-off-${day}`}
-                className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-slate-100 text-slate-700"
+                key={`${s.id}-hard-${day}`}
+                className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-rose-100 text-rose-700"
               >
                 {DAY_LABELS[day]}
               </Badge>
             ))}
-            {s.off_on_holidays && (
-              <Badge className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-blue-100 text-blue-700">
+            {s.hard_off_on_holidays && (
+              <Badge className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-rose-100 text-rose-700">
                 祝
               </Badge>
             )}
-            <Badge
-              className={`text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 ${OFF_CONSTRAINT_STYLE[s.off_days_constraint]}`}
-            >
-              {s.off_days_constraint === 'hard' ? 'ハード' : 'ソフト'}
-            </Badge>
+            {(s.soft_off_days_of_week ?? []).map((day) => (
+              <Badge
+                key={`${s.id}-soft-${day}`}
+                className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-amber-100 text-amber-700"
+              >
+                {DAY_LABELS[day]}
+              </Badge>
+            ))}
+            {s.soft_off_on_holidays && (
+              <Badge className="text-xs font-medium px-2 py-0.5 rounded hover:opacity-100 bg-amber-100 text-amber-700">
+                祝
+              </Badge>
+            )}
           </div>
         ) : (
           <span className="text-gray-400 text-sm">—</span>

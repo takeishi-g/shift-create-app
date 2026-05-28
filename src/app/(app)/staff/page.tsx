@@ -18,9 +18,10 @@ type StaffFormData = {
   work_end_time: string
   experience_years: number
   max_night_shifts: number
-  off_days_of_week: number[]
-  off_on_holidays: boolean
-  off_days_constraint: StaffProfile['off_days_constraint']
+  hard_off_days_of_week: number[]
+  soft_off_days_of_week: number[]
+  hard_off_on_holidays: boolean
+  soft_off_on_holidays: boolean
   allow_extra_off_days: boolean
 }
 
@@ -53,24 +54,26 @@ export default function StaffPage() {
   )
 
   async function handleAdd(data: StaffFormData) {
-    const { data: inserted } = await supabase
+    const { data: inserted, error } = await supabase
       .from('staff_profiles')
       .insert({ ...data, is_active: true })
       .select()
       .single()
-    if (inserted) setStaffList((prev) => [...prev, inserted])
+    if (error) throw new Error(error.message)
+    setStaffList((prev) => [...prev, inserted!])
     setFormOpen(false)
   }
 
   async function handleEdit(data: StaffFormData) {
     if (!editTarget) return
-    const { data: updated } = await supabase
+    const { data: updated, error } = await supabase
       .from('staff_profiles')
       .update({ ...data, updated_at: new Date().toISOString() })
       .eq('id', editTarget.id)
       .select()
       .single()
-    if (updated) setStaffList((prev) => prev.map((s) => s.id === editTarget.id ? updated : s))
+    if (error) throw new Error(error.message)
+    setStaffList((prev) => prev.map((s) => s.id === editTarget.id ? updated! : s))
     setEditTarget(null)
     setFormOpen(false)
   }
