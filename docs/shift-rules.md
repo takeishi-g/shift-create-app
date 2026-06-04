@@ -52,8 +52,8 @@
 |------|-----------|-----------|
 | 夜勤最低人数/日 | `min_staff_per_shift['夜勤']` | 2 |
 | 日勤最低人数/日（平日） | `min_staff_per_shift['日勤']` | 5 |
-| 土日祝の最低日勤人数 | `min_staff_weekend` | 2 |
-| 土日祝の最大日勤人数 | `max_staff_weekend` | 2 |
+| 土日祝の最低日勤人数 | `min_staff_weekend` | 3 |
+| 土日祝の最大日勤人数 | `max_staff_weekend` | 3 |
 | お風呂の日 最低人数 | `min_staff_bath_day` | 平日日勤最低人数と同じ（未設定時）。設定画面で個別変更可能 |
 | 連続勤務上限 | `max_consecutive_work_days` | 5 |
 | 目標休日数（月） | `target_off_days` | その月の土日祝の数（不足は翌月繰越） |

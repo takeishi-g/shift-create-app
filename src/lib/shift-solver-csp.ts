@@ -16,13 +16,15 @@ export interface SolverInput {
   shiftTypes?: ShiftType[]
   bathDayIndices: number[]
   prevMonthTail?: { staff_id: string; shift_code: string; day: number }[]
+  /** スタッフIDごとの前月繰越日数 */
+  carryOverByStaff?: Record<string, number>
 }
 
 export interface SolverOutput {
   grid: ShiftGrid
   warnings: string[]
   targetOffDays: number
-  solverStatus: 'success' | 'infeasible' | 'error'
+  solverStatus: 'success' | 'infeasible' | 'error' | 'supply-error'
 }
 
 type FixedLeaveCode = Extract<ShiftCode, '有' | '他' | '希休'>
@@ -191,6 +193,7 @@ function getShiftMinimums(
   constraints: ShiftConstraints | null,
   shiftTypes: ShiftType[] | undefined,
   dayMeta: DayMeta[],
+  staffCount: number,
 ) {
   const nightShiftType = shiftTypes?.find((shiftType) => shiftType.is_overnight && !shiftType.is_off)
   const dayShiftType = shiftTypes?.find((shiftType) => !shiftType.is_overnight && !shiftType.is_off)
@@ -211,11 +214,13 @@ function getShiftMinimums(
     constraints?.max_staff_per_shift?.['日勤']
 
   const minNight = Number.isFinite(Number(minNightValue)) ? Number(minNightValue) : 2
-  const minDay = Number.isFinite(Number(minDayValue)) ? Number(minDayValue) : 3
+  const minDay = Number.isFinite(Number(minDayValue)) ? Number(minDayValue) : 5
   const maxNight = Number.isFinite(Number(maxNightValue)) ? Math.max(minNight, Number(maxNightValue)) : minNight
-  const maxDay = Number.isFinite(Number(maxDayValue)) ? Math.max(minDay, Number(maxDayValue)) : minDay
-  const minWeekend = constraints?.min_staff_weekend ?? minDay
-  const maxWeekend = constraints?.max_staff_weekend ?? maxDay
+  // 平日の上限は明示設定がある場合のみ適用。未設定時はスタッフ数（実質無制限）にする。
+  // min=max になると等式制約になりinfeasibleを引き起こすため。
+  const maxDay = Number.isFinite(Number(maxDayValue)) ? Math.max(minDay, Number(maxDayValue)) : staffCount
+  const minWeekend = constraints?.min_staff_weekend ?? 3
+  const maxWeekend = constraints?.max_staff_weekend ?? 3
   const minBathDay = constraints?.min_staff_bath_day ?? minDay
 
   const requiredDayByIndex = dayMeta.map((meta) => {
@@ -226,7 +231,7 @@ function getShiftMinimums(
 
   const maxDayByIndex = dayMeta.map((meta) => (meta.isWeekend ? maxWeekend : maxDay))
 
-  return { minNight, minDay, maxNight, maxDay, requiredDayByIndex, maxDayByIndex }
+  return { minNight, minDay, maxNight, maxDay, minWeekend, requiredDayByIndex, maxDayByIndex }
 }
 
 function codeFromResult(
@@ -329,22 +334,41 @@ function addWarnings(args: {
     personalTargetByStaff,
   } = args
 
+  // 日別違反を集約して1〜2行にまとめる（ペア制約と同形式）
+  type DayViol = { day: number; actual: number; required: number }
+  const nightShort: DayViol[] = []
+  const nightOver: DayViol[] = []
+  const dayShortWeekday: DayViol[] = []
+  const dayShortWeekend: DayViol[] = []
+  const dayOverWeekday: DayViol[] = []
+  const dayOverWeekend: DayViol[] = []
+
   for (let dayIdx = 0; dayIdx < dayMeta.length; dayIdx++) {
     const nightCount = staff.filter((member) => grid[member.id][dayIdx] === '夜').length
-    const dayCount = staff.filter((member) => grid[member.id][dayIdx] === '日').length
-    if (nightCount < minNight) {
-      warnings.push(`${dayIdx + 1}日: 夜勤 ${nightCount}人（最低${minNight}人）`)
-    }
-    if (nightCount > maxNight) {
-      warnings.push(`${dayIdx + 1}日: 夜勤 ${nightCount}人（上限${maxNight}人）`)
-    }
-    if (dayCount < requiredDayByIndex[dayIdx]) {
-      warnings.push(`${dayIdx + 1}日${dayMeta[dayIdx].isWeekend ? '(土日祝)' : '(平日)'}: 日勤 ${dayCount}人（最低${requiredDayByIndex[dayIdx]}人）`)
-    }
-    if (dayCount > maxDayByIndex[dayIdx]) {
-      warnings.push(`${dayIdx + 1}日${dayMeta[dayIdx].isWeekend ? '(土日祝)' : '(平日)'}: 日勤 ${dayCount}人（上限${maxDayByIndex[dayIdx]}人）`)
-    }
+    const dayCount   = staff.filter((member) => grid[member.id][dayIdx] === '日').length
+    const isWE = dayMeta[dayIdx].isWeekend
+    if (nightCount < minNight)                  nightShort.push({ day: dayIdx + 1, actual: nightCount, required: minNight })
+    if (nightCount > maxNight)                  nightOver.push({ day: dayIdx + 1, actual: nightCount, required: maxNight })
+    if (dayCount < requiredDayByIndex[dayIdx])  (isWE ? dayShortWeekend : dayShortWeekday).push({ day: dayIdx + 1, actual: dayCount, required: requiredDayByIndex[dayIdx] })
+    if (dayCount > maxDayByIndex[dayIdx])       (isWE ? dayOverWeekend  : dayOverWeekday).push({ day: dayIdx + 1, actual: dayCount, required: maxDayByIndex[dayIdx] })
   }
+
+  const fmtDays = (vs: DayViol[], max = 5) => {
+    const days = vs.slice(0, max).map(v => `${v.day}日`).join('・')
+    return vs.length > max ? `${days} 他${vs.length - max}日（計${vs.length}日）` : `${days}（計${vs.length}日）`
+  }
+  if (nightShort.length > 0)
+    warnings.push(`夜勤が最低${nightShort[0].required}人に満たない日があります（${fmtDays(nightShort)}）。夜勤の最低人数を減らすか、スタッフの夜勤上限回数を増やしてください。`)
+  if (nightOver.length > 0)
+    warnings.push(`夜勤が上限${nightOver[0].required}人を超えた日があります（${fmtDays(nightOver)}）。夜勤の上限人数を増やすか、設定を見直してください。`)
+  if (dayShortWeekday.length > 0)
+    warnings.push(`平日の日勤が最低${dayShortWeekday[0].required}人に満たない日があります（${fmtDays(dayShortWeekday)}）。日勤の最低配置人数を減らすか、夜勤回数を調整してください。`)
+  if (dayShortWeekend.length > 0)
+    warnings.push(`土日祝の日勤が最低${dayShortWeekend[0].required}人に満たない日があります（${fmtDays(dayShortWeekend)}）。土日祝の最低配置人数を減らしてください。`)
+  if (dayOverWeekday.length > 0)
+    warnings.push(`平日の日勤が上限${dayOverWeekday[0].required}人を超えた日があります（${fmtDays(dayOverWeekday)}）。日勤の上限人数を増やすか、夜勤を増やしてください。`)
+  if (dayOverWeekend.length > 0)
+    warnings.push(`土日祝の日勤が上限${dayOverWeekend[0].required}人を超えた日があります（${fmtDays(dayOverWeekend)}）。土日祝の上限人数を増やしてください。`)
 
   for (const member of staff) {
     const shifts = grid[member.id]
@@ -365,29 +389,68 @@ function addWarnings(args: {
     }
   }
 
+  const staffNameMap = new Map(staff.map((s) => [s.id, s.name]))
   for (const pair of pairConstraints) {
+    const nameA = staffNameMap.get(pair.staff_id_a) ?? pair.staff_id_a
+    const nameB = staffNameMap.get(pair.staff_id_b) ?? pair.staff_id_b
     for (let dayIdx = 0; dayIdx < dayMeta.length; dayIdx++) {
       const a = grid[pair.staff_id_a]?.[dayIdx]
       const b = grid[pair.staff_id_b]?.[dayIdx]
       if (pair.constraint_type === 'must_not_pair') {
         if (pairTargetsNight(pair) && a === '夜' && b === '夜') {
-          warnings.push(`ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} が同日夜勤です`)
+          warnings.push(`ペア制約: ${dayIdx + 1}日 ${nameA} / ${nameB} が同日夜勤です`)
         }
         if (pairTargetsDay(pair) && a === '日' && b === '日') {
-          warnings.push(`ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} が同日日勤です`)
+          warnings.push(`ペア制約: ${dayIdx + 1}日 ${nameA} / ${nameB} が同日日勤です`)
         }
       } else {
-        if (pairTargetsNight(pair) && ((a === '夜') !== (b === '夜'))) {
-          warnings.push(`必ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} の夜勤が一致していません`)
-          break
-        }
-        if (pairTargetsDay(pair) && ((a === '日') !== (b === '日'))) {
-          warnings.push(`必ペア制約: ${dayIdx + 1}日 ${pair.staff_id_a} / ${pair.staff_id_b} の日勤が一致していません`)
+        // must_pair: 平日のみチェック（土日祝は両者休み・夜・明でも問題なし）
+        if (dayMeta[dayIdx].isWeekend) continue
+        const ngSet = new Set<string>(['公', '夜', '明'])
+        if (ngSet.has(a ?? '') && ngSet.has(b ?? '')) {
+          warnings.push(`必ペア制約: ${dayIdx + 1}日 ${nameA} / ${nameB} の日勤カバーができていません（両者とも日勤外）`)
           break
         }
       }
     }
   }
+}
+
+function checkFeasibility(
+  staff: StaffProfile[],
+  minNight: number,
+  daysInMonth: number,
+  requiredDayByIndex: number[],
+  dayMeta: DayMeta[],
+): string[] {
+  const issues: string[] = []
+
+  // 夜勤供給チェック
+  if (minNight > 0) {
+    const required = daysInMonth * minNight
+    const capacity = staff.reduce((sum, m) => sum + m.max_night_shifts, 0)
+    if (capacity < required) {
+      issues.push(
+        `夜勤の回数が足りません（必要 ${required} 回・スタッフの夜勤上限合計 ${capacity} 回）。` +
+        `スタッフの夜勤上限回数を増やすか、夜勤の最低人数を減らしてください。`,
+      )
+    }
+  }
+
+  // 日勤供給チェック（最悪ケース推定）
+  // 夜勤minNight人 + 前日明けminNight人 が常に非日勤として、残りで最低人数を確保できるか
+  const maxDayRequired = requiredDayByIndex.reduce((max, v) => Math.max(max, v), 0)
+  const weekdayMaxRequired = requiredDayByIndex.filter((_, i) => !dayMeta[i].isWeekend).reduce((max, v) => Math.max(max, v), 0)
+  const estimatedAvailable = staff.length - minNight * 2 // 夜勤+明けを除く大まかな推定
+  if (weekdayMaxRequired > 0 && estimatedAvailable < weekdayMaxRequired) {
+    issues.push(
+      `平日の日勤最低人数 ${weekdayMaxRequired} 人を確保できない日がある可能性があります` +
+      `（スタッフ ${staff.length} 人・夜勤 ${minNight} 人・明け ${minNight} 人を除くと最大 ${estimatedAvailable} 人）。` +
+      `日勤の最低人数を減らすか、夜勤の最低人数を減らしてください。`,
+    )
+  }
+
+  return issues
 }
 
 export async function generateShifts(input: SolverInput): Promise<SolverOutput> {
@@ -396,16 +459,18 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
 
   const [year, month] = yearMonth.split('-').map(Number)
   const daysInMonth = getDaysInMonth(new Date(year, month - 1))
-  const targetOffDays = constraints?.target_off_days ?? Math.round(daysInMonth * 0.27)
   const grid = emptyGrid(staff, daysInMonth)
   const dayMeta = buildDayMeta(year, month, daysInMonth, bathDayIndices)
+  const targetOffDays = constraints?.target_off_days ?? dayMeta.filter(d => d.isWeekend).length
   const { forcedAkeDays, fixedOffDays, carryInWorkDays } = buildPrevMonthInfo(staff, prevMonthTail, daysInMonth)
   const { fixedLeaveCodes, shiftPreferences, paidLeaveCount } = buildFixedLeaveData(leaveRequests, year, month)
-  const { minNight, maxNight, requiredDayByIndex, maxDayByIndex } = getShiftMinimums(constraints, shiftTypes, dayMeta)
+  const { minNight, maxNight, minWeekend, requiredDayByIndex, maxDayByIndex } = getShiftMinimums(constraints, shiftTypes, dayMeta, staff.length)
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
+  const carryOverByStaff = input.carryOverByStaff ?? {}
   const personalTargetByStaff = new Map<string, number>(
     staff.map((member) => {
       const paidLeaves = paidLeaveCount.get(member.id) ?? 0
+      const carryOver = carryOverByStaff[member.id] ?? 0
       if (!member.allow_extra_off_days) {
         const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
         const softOffDow = new Set(member.soft_off_days_of_week ?? [])
@@ -419,11 +484,22 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
             (member.soft_off_on_holidays && isHoliday)
           )
         }).filter(Boolean).length
-        return [member.id, definedOffCount + paidLeaves]
+        return [member.id, definedOffCount + paidLeaves + carryOver]
       }
-      return [member.id, targetOffDays + paidLeaves]
+      return [member.id, targetOffDays + paidLeaves + carryOver]
     }),
   )
+
+  // 事前フィージビリティチェック：明らかに解けない場合を先に検出してわかりやすく伝える
+  const feasibilityIssues = checkFeasibility(staff, minNight, daysInMonth, requiredDayByIndex, dayMeta)
+  if (feasibilityIssues.length > 0) {
+    return {
+      grid,
+      warnings: feasibilityIssues,
+      targetOffDays,
+      solverStatus: 'supply-error',
+    }
+  }
 
   let glpk: GLPK
   try {
@@ -483,6 +559,20 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     return targetMap
   })()
 
+  // 平日日勤のターゲット人数を推定（分散目的関数用）
+  // 総日勤シフト数 = 総就業日数 - 夜勤日数 - 明け日数
+  const totalWorkDays = staff.reduce((sum, member) => {
+    return sum + daysInMonth - (personalTargetByStaff.get(member.id) ?? targetOffDays)
+  }, 0)
+  const totalNightDays = staff.reduce((sum, member) => {
+    return sum + (nightTargetByStaff.get(member.id) ?? 0)
+  }, 0)
+  const totalDayShifts = Math.max(0, totalWorkDays - 2 * totalNightDays)
+  const weekendCount = dayMeta.filter((d) => d.isWeekend).length
+  const weekdayCount = daysInMonth - weekendCount
+  const weekdayDayShifts = Math.max(0, totalDayShifts - weekendCount * minWeekend)
+  const targetDayPerWeekday = weekdayCount > 0 ? Math.round(weekdayDayShifts / weekdayCount) : 0
+
   for (const member of staff) {
     const memberFixedLeaves = fixedLeaveCodes.get(member.id)
     const memberPrefs = shiftPreferences.get(member.id)
@@ -528,15 +618,88 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         softOffDow.has(date.getDay()) ||
         (member.hard_off_on_holidays && isHoliday) ||
         (member.soft_off_on_holidays && isHoliday)
+      const isSenior = member.role === '師長' || member.role === '主任'
+
+      // 前日（dayIdx-1）も hard定休（forced_off になる）かどうかを判定するヘルパー値。
+      // 連続公休（定休が連続する）の初日にのみ夜勤誘導を発動させるために使用する。
+      // 「連休の2日目以降」から D-2 への誘導は:
+      //   - 2日目（D）の場合: D-2 = 初日の前日、かつ初日が forced_off なら
+      //     ake_origin 制約により n[D-2] = a[D-1] = ... となり、n[D-2] が夜勤不可になる場合が多い
+      //   - また連休各日から重複して同じ変数に負の係数が累積するのを防ぐ
+      const prevDayHardOff = dayIdx > 0 ? (() => {
+        const pd = new Date(year, month - 1, dayIdx)
+        return hardOffDow.has(pd.getDay()) || (member.hard_off_on_holidays && HolidayJP.isHoliday(pd))
+      })() : false
+      const prevDayForcedOff = dayIdx > 0 && (
+        memberFixedLeaves?.has(dayIdx - 1) === true ||
+        memberFixedOff.has(dayIdx - 1) ||
+        prevDayHardOff
+      )
+
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
+        // 「連続定休の初日」にのみ誘導する: 前日も forced_off なら D-1 は前日の明け（ake_origin
+        // 制約で n[D-1] が 0 になる）のため夜勤不可。重複・無効誘導を防ぐ。
+        // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
+        if (isHardOffDay && member.max_night_shifts > 0 && dayIdx >= 1 && !prevDayForcedOff) {
+          if (!isSenior) {
+            // 非シニア: post_night_off と定休日を重ねて休日数節約（強め誘導）
+            addObjective(varName('n', member.id, dayIdx - 1), -3)
+          } else {
+            // シニア: senior_day_coverage ハード制約との競合を避けるため弱め誘導
+            // 別のシニアが同日日勤に入れればハード制約を満たせるのでソフト誘導は有効
+            addObjective(varName('n', member.id, dayIdx - 1), -1)
+          }
+        }
       } else if (isSoftOffDay) {
         // soft定休日: 出勤時にペナルティ（強制ではないが優先的に休みを入れる）
         addObjective(varName('n', member.id, dayIdx), 3)
         addObjective(varName('w', member.id, dayIdx), 3)
-      } else if (!member.allow_extra_off_days && !isDefinedOffDay && member.max_night_shifts === 0) {
+        // 定休日の1日前に夜勤を誘導（連続soft定休の初日のみ）
+        // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
+        const prevDaySoftOff = dayIdx > 0 ? (() => {
+          const pd = new Date(year, month - 1, dayIdx)
+          const pdHoliday = HolidayJP.isHoliday(pd)
+          return softOffDow.has(pd.getDay()) || (member.soft_off_on_holidays && pdHoliday)
+        })() : false
+        if (member.max_night_shifts > 0 && dayIdx >= 1 && !prevDayForcedOff && !prevDaySoftOff) {
+          if (!isSenior) {
+            addObjective(varName('n', member.id, dayIdx - 1), -3)
+          } else {
+            // シニア: 弱め誘導
+            addObjective(varName('n', member.id, dayIdx - 1), -1)
+          }
+        }
+      } else if (!member.allow_extra_off_days && !isDefinedOffDay && !isHoliday && member.max_night_shifts === 0) {
         // 定休日以外に公休を入れない（夜勤なしスタッフのみ。夜勤ありは post_night_off と矛盾するため除外）
+        // 祝日は除外: 祝日前後で6連勤になり infeasible になるため、solver に判断を委ねる
         addRow(`no_extra_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 0, 0)
+      }
+
+      // 土日祝（isWeekend）の連休初日に対する汎用夜勤誘導:
+      // isHardOffDay / isSoftOffDay に基づく個人定休誘導が発動しない場合でも、
+      // 土日祝の公休に夜勤パターン（夜→明→公）を重ねることで公休日数を節約できる。
+      // 「連休の初日（前日が土日祝でない）の1日前」に夜勤誘導報酬を付与する。
+      // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
+      // 条件:
+      //   - 当日が土日祝（isWeekend）
+      //   - 前日が土日祝でない（連休の初日）
+      //   - 夜勤可能・dayIdx >= 1
+      //   - isHardOffDay の個人定休誘導と重複しない（isHardOffDay の場合は上で処理済み）
+      if (
+        dayMeta[dayIdx].isWeekend &&
+        !isHardOffDay &&  // isHardOffDay は上のブロックで処理済み
+        member.max_night_shifts > 0 &&
+        dayIdx >= 1 &&
+        !dayMeta[dayIdx - 1].isWeekend  // 連休の初日のみ（前日が土日祝でない）
+      ) {
+        if (!isSenior) {
+          addObjective(varName('n', member.id, dayIdx - 1), -2)  // 個人定休誘導(-3)より弱めに設定
+        } else {
+          // シニア: senior_day_coverage との競合を避けるためさらに弱め誘導
+          // ソフト目的関数なので、別シニアが同日日勤に入れない場合はソルバーが無視できる
+          addObjective(varName('n', member.id, dayIdx - 1), -1)
+        }
       }
 
       if (dayIdx === 0) {
@@ -556,10 +719,12 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       }
 
       if (dayIdx + 2 < daysInMonth) {
+        // 2連続夜勤サポート: D+2が公 or 夜のどちらでもよい
         addRow(
           `post_night_off__${member.id}__${dayIdx}`,
           [
             { name: varName('o', member.id, dayIdx + 2), coef: 1 },
+            { name: varName('n', member.id, dayIdx + 2), coef: 1 },
             { name: n, coef: -1 },
           ],
           glpk.GLP_LO,
@@ -567,6 +732,59 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
           0,
         )
       }
+    }
+
+    // 夜勤分散: 夜勤回数が少ないスタッフは最小間隔を設けて均等化
+    // minGap = floor(daysInMonth / max_night_shifts) - 1（最低3）
+    // n[D] + n[D+k] <= 1 for k in [2, minGap]（5回以下は連続夜勤も禁止）
+    if (member.max_night_shifts >= 1 && member.max_night_shifts <= 5) {
+      const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
+      // 5回以下は連続夜勤禁止（k=2から）= 週1ペース・単独夜勤のみ
+      const startK = 2
+      for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+        for (let k = startK; k <= minGap && dayIdx + k < daysInMonth; k++) {
+          addRow(
+            `night_spacing__${member.id}__${dayIdx}__${k}`,
+            [
+              { name: varName('n', member.id, dayIdx),     coef: 1 },
+              { name: varName('n', member.id, dayIdx + k), coef: 1 },
+            ],
+            glpk.GLP_UP,
+            0,
+            1,
+          )
+        }
+      }
+    }
+
+    // 3連続夜勤禁止: n[D] + n[D+2] + n[D+4] <= 2
+    for (let dayIdx = 0; dayIdx + 4 < daysInMonth; dayIdx++) {
+      addRow(
+        `max2_consecutive_night__${member.id}__${dayIdx}`,
+        [
+          { name: varName('n', member.id, dayIdx),     coef: 1 },
+          { name: varName('n', member.id, dayIdx + 2), coef: 1 },
+          { name: varName('n', member.id, dayIdx + 4), coef: 1 },
+        ],
+        glpk.GLP_UP,
+        0,
+        2,
+      )
+    }
+
+    // 2連続夜勤後は2日公休: o[D+5] >= n[D] + n[D+2] - 1
+    for (let dayIdx = 0; dayIdx + 5 < daysInMonth; dayIdx++) {
+      addRow(
+        `double_night_second_off__${member.id}__${dayIdx}`,
+        [
+          { name: varName('o', member.id, dayIdx + 5), coef: 1 },
+          { name: varName('n', member.id, dayIdx),     coef: -1 },
+          { name: varName('n', member.id, dayIdx + 2), coef: -1 },
+        ],
+        glpk.GLP_LO,
+        -1,
+        0,
+      )
     }
 
     addRow(
@@ -646,6 +864,126 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       nightTargetByStaff.get(member.id) ?? 0,
       nightTargetByStaff.get(member.id) ?? 0,
     )
+
+    // 高夜勤スタッフ（6回以上）の前後半バランス: 月の前半と後半に夜勤を均等配置
+    // 連続夜勤許可のため間隔制約は使わず、ソフト目的関数で集中を抑制
+    if (member.max_night_shifts > 5) {
+      const halfPoint = Math.floor(daysInMonth / 2)
+      const memberNightTarget = nightTargetByStaff.get(member.id) ?? 0
+      if (memberNightTarget > 0) {
+        const expectedFirstHalf = Math.round(memberNightTarget * halfPoint / daysInMonth)
+        const halfOverName = `night_half_over__${member.id}`
+        const halfUnderName = `night_half_under__${member.id}`
+        addContinuous(halfOverName)
+        addContinuous(halfUnderName)
+        addObjective(halfOverName, 4)
+        addObjective(halfUnderName, 4)
+        // halfOver - halfUnder = sum(n[0..halfPoint-1]) - expectedFirstHalf
+        addRow(
+          `night_half_bal__${member.id}`,
+          [
+            { name: halfOverName, coef: 1 },
+            { name: halfUnderName, coef: -1 },
+            ...Array.from({ length: halfPoint }, (_, d) => ({
+              name: varName('n', member.id, d),
+              coef: -1,
+            })),
+          ],
+          glpk.GLP_FX,
+          -expectedFirstHalf,
+          -expectedFirstHalf,
+        )
+      }
+
+      // 2連続夜勤（夜明夜明）のソフトペナルティ: n[D]+n[D+2]>=2 を嫌う
+      // consec_night_pen[D] >= n[D] + n[D+2] - 1
+      for (let dayIdx = 0; dayIdx + 2 < daysInMonth; dayIdx++) {
+        const penName = `consec_night_pen__${member.id}__${dayIdx}`
+        addContinuous(penName)
+        addObjective(penName, 4)
+        addRow(
+          `consec_night_pen_row__${member.id}__${dayIdx}`,
+          [
+            { name: penName,                                  coef:  1 },
+            { name: varName('n', member.id, dayIdx),          coef: -1 },
+            { name: varName('n', member.id, dayIdx + 2),      coef: -1 },
+          ],
+          glpk.GLP_LO,
+          -1,
+          0,
+        )
+      }
+
+      // 日勤の前後半バランス: 日勤を月前半・後半に均等配置
+      // dayTarget = daysInMonth - 2*nightTarget - offTarget（夜+明を除いた推定値）
+      const memberOffTarget = personalTargetByStaff.get(member.id) ?? targetOffDays
+      const dayShiftTarget = Math.max(0, daysInMonth - 2 * memberNightTarget - memberOffTarget)
+      if (dayShiftTarget >= 2) {
+        const expectedDayFirstHalf = Math.round(dayShiftTarget * halfPoint / daysInMonth)
+        const dayHalfOverName  = `day_half_over__${member.id}`
+        const dayHalfUnderName = `day_half_under__${member.id}`
+        addContinuous(dayHalfOverName)
+        addContinuous(dayHalfUnderName)
+        addObjective(dayHalfOverName,  3)
+        addObjective(dayHalfUnderName, 3)
+        // dayHalfOver - dayHalfUnder - sum(w[0..halfPoint-1]) = -expectedDayFirstHalf
+        addRow(
+          `day_half_bal__${member.id}`,
+          [
+            { name: dayHalfOverName,  coef:  1 },
+            { name: dayHalfUnderName, coef: -1 },
+            ...Array.from({ length: halfPoint }, (_, d) => ({
+              name: varName('w', member.id, d),
+              coef: -1,
+            })),
+          ],
+          glpk.GLP_FX,
+          -expectedDayFirstHalf,
+          -expectedDayFirstHalf,
+        )
+      }
+    }
+
+    // 3連続日勤のソフトペナルティ: 日勤が塊にならないよう均等化
+    // consec_day_pen[D] >= w[D] + w[D+1] + w[D+2] - 2
+    for (let dayIdx = 0; dayIdx + 2 < daysInMonth; dayIdx++) {
+      const penName = `consec_day_pen__${member.id}__${dayIdx}`
+      addContinuous(penName)
+      addObjective(penName, 2)
+      addRow(
+        `consec_day_pen_row__${member.id}__${dayIdx}`,
+        [
+          { name: penName,                                  coef:  1 },
+          { name: varName('w', member.id, dayIdx),          coef: -1 },
+          { name: varName('w', member.id, dayIdx + 1),      coef: -1 },
+          { name: varName('w', member.id, dayIdx + 2),      coef: -1 },
+        ],
+        glpk.GLP_LO,
+        -2,
+        0,
+      )
+    }
+  }
+
+  // 平日日勤の分散目的関数: ターゲットを超える人数にペナルティを加え均等化を促す
+  if (targetDayPerWeekday > 0) {
+    for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+      if (dayMeta[dayIdx].isWeekend) continue
+      const overName = `day_bal_over__${dayIdx}`
+      addContinuous(overName)
+      addObjective(overName, 3)
+      // over >= sum(w[s][d]) - target  →  over - sum(w) >= -target
+      addRow(
+        `day_bal__${dayIdx}`,
+        [
+          { name: overName, coef: 1 },
+          ...staff.map((member) => ({ name: varName('w', member.id, dayIdx), coef: -1 })),
+        ],
+        glpk.GLP_LO,
+        -targetDayPerWeekday,
+        0,
+      )
+    }
   }
 
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
@@ -741,18 +1079,19 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       }
 
       if (pair.shift_type_id === null) {
-        for (const prefix of ['n', 'w', 'a', 'o'] as const) {
-          addRow(
-            `must_pair_all__${prefix}__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
-            [
-              { name: varName(prefix, pair.staff_id_a, dayIdx), coef: 1 },
-              { name: varName(prefix, pair.staff_id_b, dayIdx), coef: -1 },
-            ],
-            glpk.GLP_FX,
-            0,
-            0,
-          )
-        }
+        // 土日祝はスキップ（両者休み・夜・明でも問題なし）
+        if (dayMeta[dayIdx].isWeekend) continue
+        // 「どちらかが公/夜/明なら、もう1人は必ず日勤」= 両者合わせて日勤が1人以上
+        addRow(
+          `must_pair_day_coverage__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
+          [
+            { name: varName('w', pair.staff_id_a, dayIdx), coef: 1 },
+            { name: varName('w', pair.staff_id_b, dayIdx), coef: 1 },
+          ],
+          glpk.GLP_LO,
+          1,
+          0,
+        )
         continue
       }
 

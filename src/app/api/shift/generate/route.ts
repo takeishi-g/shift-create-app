@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     { data: pairConstraints },
     { data: shiftTypes },
     { data: prevTailRaw },
+    { data: carryOversRaw },
   ] = await Promise.all([
     supabase.from('staff_profiles').select('*').eq('is_active', true).order('sort_order').order('created_at'),
     supabase.from('shift_constraints').select('*').eq('year_month', year_month).maybeSingle(),
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
     supabase.from('shift_types').select('*').order('display_order'),
     tailFromBody ? Promise.resolve({ data: null }) :
       supabase.from('shift_assignments').select('staff_id, shift_code, date').in('date', [prevSecondLast, prevLastDay]),
+    supabase.from('staff_carry_overs').select('staff_id, carry_over_days').eq('to_month', year_month),
   ])
 
   const prevMonthTail: TailEntry[] = tailFromBody ?? (prevTailRaw ?? []).map((r) => ({
@@ -96,6 +98,11 @@ export async function POST(request: Request) {
   }
 
   const constraints = constraintsByMonth ?? constraintsFallback ?? null
+
+  const carryOverByStaff: Record<string, number> = {}
+  for (const co of carryOversRaw ?? []) {
+    carryOverByStaff[co.staff_id as string] = co.carry_over_days as number
+  }
 
   // 画面側で選択済みの場合はそれを優先、なければ制約設定の bath_days_of_week から計算
   const bathDayIndices: number[] = bathDayIndicesFromUI ?? (() => {
@@ -118,6 +125,7 @@ export async function POST(request: Request) {
     shiftTypes: shiftTypes ?? [],
     bathDayIndices,
     prevMonthTail,
+    carryOverByStaff,
   }
 
   let { grid, warnings, targetOffDays, solverStatus } = await generateShifts(solverInput)
@@ -125,7 +133,8 @@ export async function POST(request: Request) {
   let resultStatus = solverStatus
   let fallbackUsed = false
 
-  if (solverStatus !== 'success') {
+  // supply-error は供給不足（夜勤・日勤の設定値が根本的に不足）なのでフォールバックでも解決できない
+  if (solverStatus !== 'success' && solverStatus !== 'supply-error') {
     const fallback = await generateShiftsFallback(solverInput)
     grid = fallback.grid
     warnings = fallback.warnings

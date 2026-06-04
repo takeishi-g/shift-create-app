@@ -19,7 +19,7 @@ import { ConstraintSummary } from '@/components/features/constraints/ConstraintS
 import { createClient } from '@/lib/supabase/client'
 
 type ShiftCode = '日' | '夜' | '明' | '公' | '有' | '他' | '希休' | ''
-type SolverStatus = 'success' | 'infeasible' | 'error'
+type SolverStatus = 'success' | 'infeasible' | 'error' | 'supply-error'
 
 interface ShiftDef {
   code: string
@@ -37,6 +37,8 @@ function statusLabel(status: SolverStatus | null) {
       return '充足不能'
     case 'error':
       return 'エラー'
+    case 'supply-error':
+      return '供給不足'
     default:
       return '未実行'
   }
@@ -49,6 +51,7 @@ function statusClass(status: SolverStatus | null) {
     case 'infeasible':
       return 'border-amber-200 bg-amber-50 text-amber-700'
     case 'error':
+    case 'supply-error':
       return 'border-red-200 bg-red-50 text-red-700'
     default:
       return 'border-gray-200 bg-gray-50 text-gray-500'
@@ -905,11 +908,13 @@ export default function ShiftEditPage() {
       )}
 
       {(fallbackUsed || genWarnings.length > 0) && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
+        <div className={`rounded-lg border px-4 py-3 text-xs space-y-1 ${solverStatus === 'supply-error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
           <p className="font-semibold">
-            {fallbackUsed
-              ? '⚠️ 制約ソルバーでは解けなかったため、ベストエフォート結果を表示しています（必要に応じて手動修正してください）'
-              : '⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）'}
+            {solverStatus === 'supply-error'
+              ? '❌ スタッフの夜勤・日勤の上限設定が不足しているため、シフトを生成できません。スタッフ設定を修正してください。'
+              : fallbackUsed
+                ? '⚠️ 制約ソルバーでは解けなかったため、ベストエフォート結果を表示しています（必要に応じて手動修正してください）'
+                : '⚠️ 以下の制約を完全に満たせませんでした（手動で修正してください）'}
           </p>
           {genWarnings.map((w, i) => <p key={i}>・{w}</p>)}
         </div>
