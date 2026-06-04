@@ -638,36 +638,54 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
 
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
-        // 「連続定休の初日」にのみ誘導する: 前日も forced_off なら D-1 は前日の明け（ake_origin
-        // 制約で n[D-1] が 0 になる）のため夜勤不可。重複・無効誘導を防ぐ。
-        // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
-        if (isHardOffDay && member.max_night_shifts > 0 && dayIdx >= 1 && !prevDayForcedOff) {
-          if (!isSenior) {
-            // 非シニア: post_night_off と定休日を重ねて休日数節約（強め誘導）
-            addObjective(varName('n', member.id, dayIdx - 1), -3)
-          } else {
-            // シニア: senior_day_coverage ハード制約との競合を避けるため弱め誘導
-            // 別のシニアが同日日勤に入れればハード制約を満たせるのでソフト誘導は有効
-            addObjective(varName('n', member.id, dayIdx - 1), -1)
+        // 定休日X の2日前に夜勤を誘導: 夜（X-2）→ 明（X-1）→ 公（X=定休日）
+        // X-1 誘導だと forced_off[X]=1 と ake_origin[X]=n[X-1] が衝突するため X-2 を使用。
+        // 「連続定休の初日」にのみ誘導: prevDayForcedOff=true なら X-1 は別の定休の明けになり
+        // n[X-2] も夜勤不可になるため重複誘導を防ぐ。
+        if (isHardOffDay && member.max_night_shifts > 0 && dayIdx >= 2 && !prevDayForcedOff) {
+          const prevPrevDate = new Date(year, month - 1, dayIdx - 1)
+          const prevPrevDayHardOff =
+            hardOffDow.has(prevPrevDate.getDay()) ||
+            (member.hard_off_on_holidays && HolidayJP.isHoliday(prevPrevDate))
+          const prevPrevDayForcedOff =
+            memberFixedLeaves?.has(dayIdx - 2) === true ||
+            memberFixedOff.has(dayIdx - 2) ||
+            prevPrevDayHardOff
+          if (!prevPrevDayForcedOff) {
+            if (!isSenior) {
+              // 非シニア: post_night_off と定休日を重ねて休日数節約（強め誘導）
+              addObjective(varName('n', member.id, dayIdx - 2), -3)
+            } else {
+              // シニア: senior_day_coverage ハード制約との競合を避けるため弱め誘導
+              addObjective(varName('n', member.id, dayIdx - 2), -1)
+            }
           }
         }
       } else if (isSoftOffDay) {
         // soft定休日: 出勤時にペナルティ（強制ではないが優先的に休みを入れる）
         addObjective(varName('n', member.id, dayIdx), 3)
         addObjective(varName('w', member.id, dayIdx), 3)
-        // 定休日の1日前に夜勤を誘導（連続soft定休の初日のみ）
-        // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
+        // 定休日X の2日前に夜勤を誘導: 夜（X-2）→ 明（X-1）→ 公（X=ソフト定休日）
+        // 連続soft定休の初日のみ誘導（重複誘導防止）
         const prevDaySoftOff = dayIdx > 0 ? (() => {
           const pd = new Date(year, month - 1, dayIdx)
           const pdHoliday = HolidayJP.isHoliday(pd)
           return softOffDow.has(pd.getDay()) || (member.soft_off_on_holidays && pdHoliday)
         })() : false
-        if (member.max_night_shifts > 0 && dayIdx >= 1 && !prevDayForcedOff && !prevDaySoftOff) {
-          if (!isSenior) {
-            addObjective(varName('n', member.id, dayIdx - 1), -3)
-          } else {
-            // シニア: 弱め誘導
-            addObjective(varName('n', member.id, dayIdx - 1), -1)
+        if (member.max_night_shifts > 0 && dayIdx >= 2 && !prevDayForcedOff && !prevDaySoftOff) {
+          const prevPrevDate = new Date(year, month - 1, dayIdx - 1)
+          const prevPrevDayForcedOff =
+            memberFixedLeaves?.has(dayIdx - 2) === true ||
+            memberFixedOff.has(dayIdx - 2) ||
+            hardOffDow.has(prevPrevDate.getDay()) ||
+            (member.hard_off_on_holidays && HolidayJP.isHoliday(prevPrevDate))
+          if (!prevPrevDayForcedOff) {
+            if (!isSenior) {
+              addObjective(varName('n', member.id, dayIdx - 2), -3)
+            } else {
+              // シニア: 弱め誘導
+              addObjective(varName('n', member.id, dayIdx - 2), -1)
+            }
           }
         }
       } else if (!member.allow_extra_off_days && !isDefinedOffDay && !isHoliday && member.max_night_shifts === 0) {
@@ -679,26 +697,25 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       // 土日祝（isWeekend）の連休初日に対する汎用夜勤誘導:
       // isHardOffDay / isSoftOffDay に基づく個人定休誘導が発動しない場合でも、
       // 土日祝の公休に夜勤パターン（夜→明→公）を重ねることで公休日数を節約できる。
-      // 「連休の初日（前日が土日祝でない）の1日前」に夜勤誘導報酬を付与する。
-      // 夜（D-1）→ 明（D=連休初日）→ 公（D+1）のパターンで明けを連休初日に重ねる。
+      // 夜（D-2）→ 明（D-1）→ 公（D=連休初日）のパターンで公を連休初日に重ねる。
       // 条件:
-      //   - 当日が土日祝（isWeekend）
-      //   - 前日が土日祝でない（連休の初日）
-      //   - 夜勤可能・dayIdx >= 1
+      //   - 当日が土日祝（isWeekend）かつ前日が土日祝でない（連休の初日）
+      //   - D-2 も土日祝でない（夜勤を置ける平日）
+      //   - 夜勤可能・dayIdx >= 2
       //   - isHardOffDay の個人定休誘導と重複しない（isHardOffDay の場合は上で処理済み）
       if (
         dayMeta[dayIdx].isWeekend &&
-        !isHardOffDay &&  // isHardOffDay は上のブロックで処理済み
+        !isHardOffDay &&
         member.max_night_shifts > 0 &&
-        dayIdx >= 1 &&
-        !dayMeta[dayIdx - 1].isWeekend  // 連休の初日のみ（前日が土日祝でない）
+        dayIdx >= 2 &&
+        !dayMeta[dayIdx - 1].isWeekend &&  // 連休の初日のみ（前日が土日祝でない）
+        !dayMeta[dayIdx - 2].isWeekend     // D-2 も平日（夜勤を置ける）
       ) {
         if (!isSenior) {
-          addObjective(varName('n', member.id, dayIdx - 1), -2)  // 個人定休誘導(-3)より弱めに設定
+          addObjective(varName('n', member.id, dayIdx - 2), -2)  // 個人定休誘導(-3)より弱めに設定
         } else {
           // シニア: senior_day_coverage との競合を避けるためさらに弱め誘導
-          // ソフト目的関数なので、別シニアが同日日勤に入れない場合はソルバーが無視できる
-          addObjective(varName('n', member.id, dayIdx - 1), -1)
+          addObjective(varName('n', member.id, dayIdx - 2), -1)
         }
       }
 
