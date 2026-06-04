@@ -865,34 +865,36 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       nightTargetByStaff.get(member.id) ?? 0,
     )
 
-    // 高夜勤スタッフ（6回以上）の前後半バランス: 月の前半と後半に夜勤を均等配置
-    // 連続夜勤許可のため間隔制約は使わず、ソフト目的関数で集中を抑制
+    // 高夜勤スタッフ（6回以上）の3分割ハードバランス: 各ゾーンの上限をceil(target/3)に制限
+    // 連続夜勤パターン（夜→明→夜→明→公→公）は維持しつつ、ゾーン内集中を防ぐ
     if (member.max_night_shifts > 5) {
-      const halfPoint = Math.floor(daysInMonth / 2)
       const memberNightTarget = nightTargetByStaff.get(member.id) ?? 0
       if (memberNightTarget > 0) {
-        const expectedFirstHalf = Math.round(memberNightTarget * halfPoint / daysInMonth)
-        const halfOverName = `night_half_over__${member.id}`
-        const halfUnderName = `night_half_under__${member.id}`
-        addContinuous(halfOverName)
-        addContinuous(halfUnderName)
-        addObjective(halfOverName, 4)
-        addObjective(halfUnderName, 4)
-        // halfOver - halfUnder = sum(n[0..halfPoint-1]) - expectedFirstHalf
-        addRow(
-          `night_half_bal__${member.id}`,
-          [
-            { name: halfOverName, coef: 1 },
-            { name: halfUnderName, coef: -1 },
-            ...Array.from({ length: halfPoint }, (_, d) => ({
-              name: varName('n', member.id, d),
-              coef: -1,
+        const zoneSize = Math.floor(daysInMonth / 3)
+        const zoneBounds = [
+          { start: 0,            end: zoneSize },
+          { start: zoneSize,     end: zoneSize * 2 },
+          { start: zoneSize * 2, end: daysInMonth },
+        ]
+        for (let z = 0; z < zoneBounds.length; z++) {
+          const { start, end } = zoneBounds[z]
+          const zoneLen = end - start
+          // 各ゾーンの上限: ceil(target × zoneLen / daysInMonth)
+          // 下限: floor(target × zoneLen / daysInMonth)（0未満にならないよう保護）
+          const exactTarget = memberNightTarget * zoneLen / daysInMonth
+          const minInZone = Math.max(0, Math.floor(exactTarget))
+          const maxInZone = Math.ceil(exactTarget)
+          addRow(
+            `night_zone_hard__${member.id}__${z}`,
+            Array.from({ length: zoneLen }, (_, d) => ({
+              name: varName('n', member.id, start + d),
+              coef: 1,
             })),
-          ],
-          glpk.GLP_FX,
-          -expectedFirstHalf,
-          -expectedFirstHalf,
-        )
+            glpk.GLP_DB,
+            minInZone,
+            maxInZone,
+          )
+        }
       }
 
       // 2連続夜勤（夜明夜明）のソフトペナルティ: n[D]+n[D+2]>=2 を嫌う
