@@ -918,6 +918,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
 
       // 日勤の前後半バランス: 日勤を月前半・後半に均等配置
       // dayTarget = daysInMonth - 2*nightTarget - offTarget（夜+明を除いた推定値）
+      const halfPoint = Math.floor(daysInMonth / 2)
       const memberOffTarget = personalTargetByStaff.get(member.id) ?? targetOffDays
       const dayShiftTarget = Math.max(0, daysInMonth - 2 * memberNightTarget - memberOffTarget)
       if (dayShiftTarget >= 2) {
