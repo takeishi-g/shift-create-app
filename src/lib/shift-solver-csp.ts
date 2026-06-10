@@ -18,6 +18,8 @@ export interface SolverInput {
   prevMonthTail?: { staff_id: string; shift_code: string; day: number }[]
   /** スタッフIDごとの前月繰越日数 */
   carryOverByStaff?: Record<string, number>
+  /** カスタム休日の日付文字列（'YYYY-MM-DD'[]）。isWeekend 判定に使用する */
+  customHolidayDates?: string[]
 }
 
 export interface SolverOutput {
@@ -170,12 +172,24 @@ function buildFixedLeaveData(leaveRequests: LeaveRequest[], year: number, month:
   return { fixedLeaveCodes, shiftPreferences, paidLeaveCount }
 }
 
-function buildDayMeta(year: number, month: number, daysInMonth: number, bathDayIndices: number[]): DayMeta[] {
+function buildDayMeta(
+  year: number,
+  month: number,
+  daysInMonth: number,
+  bathDayIndices: number[],
+  customHolidayDates?: string[],
+): DayMeta[] {
   const bathSet = new Set(bathDayIndices)
+  const customHolidaySet = new Set(customHolidayDates ?? [])
   return Array.from({ length: daysInMonth }, (_, dayIdx) => {
     const date = new Date(year, month - 1, dayIdx + 1)
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
     return {
-      isWeekend: date.getDay() === 0 || date.getDay() === 6 || HolidayJP.isHoliday(date),
+      isWeekend:
+        date.getDay() === 0 ||
+        date.getDay() === 6 ||
+        HolidayJP.isHoliday(date) ||
+        customHolidaySet.has(dateStr),
       isBathDay: bathSet.has(dayIdx),
     }
   })
@@ -454,13 +468,13 @@ function checkFeasibility(
 }
 
 export async function generateShifts(input: SolverInput): Promise<SolverOutput> {
-  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail } = input
+  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail, customHolidayDates } = input
   const warnings: string[] = []
 
   const [year, month] = yearMonth.split('-').map(Number)
   const daysInMonth = getDaysInMonth(new Date(year, month - 1))
   const grid = emptyGrid(staff, daysInMonth)
-  const dayMeta = buildDayMeta(year, month, daysInMonth, bathDayIndices)
+  const dayMeta = buildDayMeta(year, month, daysInMonth, bathDayIndices, customHolidayDates)
   const targetOffDays = constraints?.target_off_days ?? dayMeta.filter(d => d.isWeekend).length
   const { forcedAkeDays, fixedOffDays, carryInWorkDays } = buildPrevMonthInfo(staff, prevMonthTail, daysInMonth)
   const { fixedLeaveCodes, shiftPreferences, paidLeaveCount } = buildFixedLeaveData(leaveRequests, year, month)
@@ -474,9 +488,11 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       if (!member.allow_extra_off_days) {
         const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
         const softOffDow = new Set(member.soft_off_days_of_week ?? [])
+        const customHolidaySet = new Set(customHolidayDates ?? [])
         const definedOffCount = Array.from({ length: daysInMonth }, (_, dayIdx) => {
           const date = new Date(year, month - 1, dayIdx + 1)
-          const isHoliday = HolidayJP.isHoliday(date)
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+          const isHoliday = HolidayJP.isHoliday(date) || customHolidaySet.has(dateStr)
           return (
             hardOffDow.has(date.getDay()) ||
             softOffDow.has(date.getDay()) ||
@@ -602,7 +618,8 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       )
 
       const date = new Date(year, month - 1, dayIdx + 1)
-      const isHoliday = HolidayJP.isHoliday(date)
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+      const isHoliday = HolidayJP.isHoliday(date) || (customHolidayDates ?? []).includes(dateStr)
       const pref = memberPrefs?.get(dayIdx)
       const isHardOffDay =
         hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && isHoliday)
@@ -628,7 +645,8 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       //   - また連休各日から重複して同じ変数に負の係数が累積するのを防ぐ
       const prevDayHardOff = dayIdx > 0 ? (() => {
         const pd = new Date(year, month - 1, dayIdx)
-        return hardOffDow.has(pd.getDay()) || (member.hard_off_on_holidays && HolidayJP.isHoliday(pd))
+        const pdStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx).padStart(2, '0')}`
+        return hardOffDow.has(pd.getDay()) || (member.hard_off_on_holidays && (HolidayJP.isHoliday(pd) || (customHolidayDates ?? []).includes(pdStr)))
       })() : false
       const prevDayForcedOff = dayIdx > 0 && (
         memberFixedLeaves?.has(dayIdx - 1) === true ||
@@ -644,9 +662,10 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         // n[X-2] も夜勤不可になるため重複誘導を防ぐ。
         if (isHardOffDay && member.max_night_shifts > 0 && dayIdx >= 2 && !prevDayForcedOff) {
           const prevPrevDate = new Date(year, month - 1, dayIdx - 1)
+          const prevPrevDateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx - 1).padStart(2, '0')}`
           const prevPrevDayHardOff =
             hardOffDow.has(prevPrevDate.getDay()) ||
-            (member.hard_off_on_holidays && HolidayJP.isHoliday(prevPrevDate))
+            (member.hard_off_on_holidays && (HolidayJP.isHoliday(prevPrevDate) || (customHolidayDates ?? []).includes(prevPrevDateStr)))
           const prevPrevDayForcedOff =
             memberFixedLeaves?.has(dayIdx - 2) === true ||
             memberFixedOff.has(dayIdx - 2) ||
@@ -669,16 +688,18 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         // 連続soft定休の初日のみ誘導（重複誘導防止）
         const prevDaySoftOff = dayIdx > 0 ? (() => {
           const pd = new Date(year, month - 1, dayIdx)
-          const pdHoliday = HolidayJP.isHoliday(pd)
+          const pdStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx).padStart(2, '0')}`
+          const pdHoliday = HolidayJP.isHoliday(pd) || (customHolidayDates ?? []).includes(pdStr)
           return softOffDow.has(pd.getDay()) || (member.soft_off_on_holidays && pdHoliday)
         })() : false
         if (member.max_night_shifts > 0 && dayIdx >= 2 && !prevDayForcedOff && !prevDaySoftOff) {
           const prevPrevDate = new Date(year, month - 1, dayIdx - 1)
+          const prevPrevDateStr2 = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx - 1).padStart(2, '0')}`
           const prevPrevDayForcedOff =
             memberFixedLeaves?.has(dayIdx - 2) === true ||
             memberFixedOff.has(dayIdx - 2) ||
             hardOffDow.has(prevPrevDate.getDay()) ||
-            (member.hard_off_on_holidays && HolidayJP.isHoliday(prevPrevDate))
+            (member.hard_off_on_holidays && (HolidayJP.isHoliday(prevPrevDate) || (customHolidayDates ?? []).includes(prevPrevDateStr2)))
           if (!prevPrevDayForcedOff) {
             if (!isSenior) {
               addObjective(varName('n', member.id, dayIdx - 2), -3)

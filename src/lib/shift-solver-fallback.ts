@@ -76,9 +76,15 @@ function getDayRequirements(
   year: number,
   month: number,
   bathSet: Set<number>,
+  customHolidayDates?: string[],
 ) {
   const date = new Date(year, month - 1, dayIdx + 1)
-  const isWeekend = date.getDay() === 0 || date.getDay() === 6 || HolidayJP.isHoliday(date)
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+  const isWeekend =
+    date.getDay() === 0 ||
+    date.getDay() === 6 ||
+    HolidayJP.isHoliday(date) ||
+    (customHolidayDates ?? []).includes(dateStr)
   const nightShiftType = shiftTypes?.find((shiftType) => shiftType.is_overnight && !shiftType.is_off)
   const dayShiftType = shiftTypes?.find((shiftType) => !shiftType.is_overnight && !shiftType.is_off)
   const dayKey = dayShiftType?.name ?? '日勤'
@@ -96,13 +102,19 @@ function getDayRequirements(
   return { requiredDay, dayLimit, minNight, isWeekend }
 }
 
-function isWeekdayDate(year: number, month: number, dayIdx: number): boolean {
+function isWeekdayDate(year: number, month: number, dayIdx: number, customHolidayDates?: string[]): boolean {
   const date = new Date(year, month - 1, dayIdx + 1)
-  return date.getDay() !== 0 && date.getDay() !== 6 && !HolidayJP.isHoliday(date)
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+  return (
+    date.getDay() !== 0 &&
+    date.getDay() !== 6 &&
+    !HolidayJP.isHoliday(date) &&
+    !(customHolidayDates ?? []).includes(dateStr)
+  )
 }
 
 export async function generateShiftsFallback(input: SolverInput): Promise<SolverOutput> {
-  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail } = input
+  const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail, customHolidayDates } = input
   const warnings: string[] = ['⚠️ 制約ソルバーで解けなかったため、ベストエフォートで生成しました']
 
   const [year, month] = yearMonth.split('-').map(Number)
@@ -168,7 +180,9 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (grid[member.id][dayIdx] !== '') continue
       const date = new Date(year, month - 1, dayIdx + 1)
-      if (hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && HolidayJP.isHoliday(date))) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+      const isHoliday = HolidayJP.isHoliday(date) || (customHolidayDates ?? []).includes(dateStr)
+      if (hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && isHoliday)) {
         grid[member.id][dayIdx] = '公'
       }
     }
@@ -181,7 +195,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
 
   // Phase 2: 夜勤アサイン（D+2の公休は後処理で付与）
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const { minNight, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
+    const { minNight, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
     const assignedNightIds = new Set<string>()
     staff.forEach((member) => {
       if (grid[member.id][dayIdx] === '夜') assignedNightIds.add(member.id)
@@ -212,7 +226,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
           if (!otherSeniorCanCoverToday) return false
         }
         // D+2（公休予定日）が平日なら、他シニアがカバーできるかチェック
-        if (dayIdx + 2 < daysInMonth && isWeekdayDate(year, month, dayIdx + 2)) {
+        if (dayIdx + 2 < daysInMonth && isWeekdayDate(year, month, dayIdx + 2, customHolidayDates)) {
           const otherSeniorCanCoverPostNight = staff.some(
             (s) => s.id !== member.id && seniorIds.has(s.id) &&
               (grid[s.id][dayIdx + 2] === '日' || canAssignDay(grid, s.id, dayIdx + 2, maxConsecutive)),
@@ -254,7 +268,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
           )
           if (!otherSeniorCanCoverToday) continue
         }
-        if (dayIdx + 2 < daysInMonth && isWeekdayDate(year, month, dayIdx + 2)) {
+        if (dayIdx + 2 < daysInMonth && isWeekdayDate(year, month, dayIdx + 2, customHolidayDates)) {
           const otherSeniorCanCoverPostNight = staff.some(
             (s) => s.id !== candidate.id && seniorIds.has(s.id) &&
               (grid[s.id][dayIdx + 2] === '日' || canAssignDay(grid, s.id, dayIdx + 2, maxConsecutive)),
@@ -309,7 +323,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   const carryOverByStaff = input.carryOverByStaff ?? {}
   let fallbackStatus: SolverOutput['solverStatus'] = 'success'
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
-    const { requiredDay, dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
+    const { requiredDay, dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
 
     if (!isWeekend && !staff.some((member) => seniorIds.has(member.id) && grid[member.id][dayIdx] === '日')) {
       const seniorCandidate = staff
@@ -357,7 +371,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
         continue
       }
 
-      const { dayLimit } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet)
+      const { dayLimit } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
       const currentDayCount = staff.filter((candidate) => grid[candidate.id][dayIdx] === '日').length
       if (currentDayCount < dayLimit && canAssignDay(grid, member.id, dayIdx, maxConsecutive)) {
         grid[member.id][dayIdx] = '日'
@@ -392,7 +406,12 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
     const ngSet = new Set<string>(['公', '夜', '明'])
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       const date = new Date(year, month - 1, dayIdx + 1)
-      const isWeekendOrHoliday = date.getDay() === 0 || date.getDay() === 6 || HolidayJP.isHoliday(date)
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+      const isWeekendOrHoliday =
+        date.getDay() === 0 ||
+        date.getDay() === 6 ||
+        HolidayJP.isHoliday(date) ||
+        (customHolidayDates ?? []).includes(dateStr)
       if (isWeekendOrHoliday) continue
       const a = grid[pair.staff_id_a]?.[dayIdx]
       const b = grid[pair.staff_id_b]?.[dayIdx]
