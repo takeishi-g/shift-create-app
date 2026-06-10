@@ -5,7 +5,8 @@
       "mcp__github__update_issue",
       "mcp__github__get_issue",
       "mcp__claude_ai_Supabase__execute_sql",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "mcp__88577c6b-7314-4cf8-ba14-a6fca8b7489a__execute_sql"
     ]
   },
   "enabledMcpjsonServers": [
