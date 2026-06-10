@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { getDaysInMonth, getDay, addMonths, startOfMonth } from 'date-fns'
+import { getDaysInMonth, getDay, addMonths, startOfMonth, format } from 'date-fns'
 import HolidayJP from '@holiday-jp/holiday_jp'
 import { useReactToPrint } from 'react-to-print'
 import {
@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { StaffProfile, deriveWorkHoursType } from '@/types'
+import { StaffProfile, deriveWorkHoursType, CustomHoliday } from '@/types'
 import { ConstraintSummary } from '@/components/features/constraints/ConstraintSummary'
 import { createClient } from '@/lib/supabase/client'
 
@@ -104,6 +104,7 @@ export default function ShiftTablePage() {
   const [carryOverMap, setCarryOverMap] = useState<Record<string, number>>({})
   const [shiftPrefMap, setShiftPrefMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [customHolidayDates, setCustomHolidayDates] = useState<string[]>([])
   const handlePrint = useReactToPrint({ contentRef: printRef, documentTitle: `シフト表_${selectedMonth}` })
 
   useEffect(() => {
@@ -125,6 +126,23 @@ export default function ShiftTablePage() {
       if (stored) setBathDaysDow(JSON.parse(stored))
     } catch {}
   }, [])
+
+  // 選択月が変わるたびに当月のカスタム休日を取得
+  useEffect(() => {
+    async function loadCustomHolidays() {
+      const monthStart = `${selectedMonth}-01`
+      const [year, month] = selectedMonth.split('-').map(Number)
+      const lastDay = getDaysInMonth(new Date(year, month - 1))
+      const monthEnd = `${selectedMonth}-${String(lastDay).padStart(2, '0')}`
+      const { data } = await supabase
+        .from('custom_holidays')
+        .select('date')
+        .gte('date', monthStart)
+        .lte('date', monthEnd)
+      if (data) setCustomHolidayDates((data as Pick<CustomHoliday, 'date'>[]).map((h) => h.date))
+    }
+    loadCustomHolidays()
+  }, [selectedMonth])
 
   useEffect(() => {
     async function loadShifts() {
@@ -208,7 +226,7 @@ export default function ShiftTablePage() {
         dow,
         dateStr,
         isBath: bathSet.has(dateStr) || bathDaysDow.includes(dow),
-        isHoliday: HolidayJP.isHoliday(date),
+        isHoliday: HolidayJP.isHoliday(date) || customHolidayDates.includes(format(date, 'yyyy-MM-dd')),
       }
     })
     const rows: StaffRow[] = staffList.map((staff) => {
@@ -222,7 +240,7 @@ export default function ShiftTablePage() {
       }
     })
     return { days, rows }
-  }, [selectedMonth, staffList, shiftMap, bathSet, bathDaysDow, carryOverMap])
+  }, [selectedMonth, staffList, shiftMap, bathSet, bathDaysDow, carryOverMap, customHolidayDates])
 
   const dailyCounts = useMemo(() => {
     return days.map((_, i) => {

@@ -144,6 +144,17 @@ export interface StaffCarryOver {
 }
 
 // =============================
+// カスタム休日
+// =============================
+export interface CustomHoliday {
+  id: string
+  /** YYYY-MM-DD */
+  date: string
+  name: string
+  created_at: string
+}
+
+// =============================
 // シフト割り当て
 // =============================
 export interface ScheduleMonth {

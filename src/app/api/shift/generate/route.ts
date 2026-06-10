@@ -75,6 +75,7 @@ export async function POST(request: Request) {
     { data: shiftTypes },
     { data: prevTailRaw },
     { data: carryOversRaw },
+    { data: customHolidaysRaw },
   ] = await Promise.all([
     supabase.from('staff_profiles').select('*').eq('is_active', true).order('sort_order').order('created_at'),
     supabase.from('shift_constraints').select('*').eq('year_month', year_month).maybeSingle(),
@@ -85,6 +86,7 @@ export async function POST(request: Request) {
     tailFromBody ? Promise.resolve({ data: null }) :
       supabase.from('shift_assignments').select('staff_id, shift_code, date').in('date', [prevSecondLast, prevLastDay]),
     supabase.from('staff_carry_overs').select('staff_id, carry_over_days').eq('to_month', year_month),
+    supabase.from('custom_holidays').select('date').gte('date', monthStart).lte('date', monthEnd),
   ])
 
   const prevMonthTail: TailEntry[] = tailFromBody ?? (prevTailRaw ?? []).map((r) => ({
@@ -126,6 +128,7 @@ export async function POST(request: Request) {
     bathDayIndices,
     prevMonthTail,
     carryOverByStaff,
+    customHolidayDates: (customHolidaysRaw ?? []).map((h) => h.date as string),
   }
 
   let { grid, warnings, targetOffDays, solverStatus } = await generateShifts(solverInput)

@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react'
 import { format, addMonths } from 'date-fns'
 import { ja } from 'date-fns/locale'
-import { Plus, X, CheckCircle2, XCircle, CalendarDays, Shield } from 'lucide-react'
+import { Plus, X, CheckCircle2, XCircle, CalendarDays, Shield, Calendar } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
-import { StaffProfile, ShiftType, StaffPairConstraint, PairConstraintType } from '@/types'
+import { StaffProfile, ShiftType, StaffPairConstraint, PairConstraintType, CustomHoliday } from '@/types'
 import { PairConstraintDialog, PairConstraintFormData } from '@/components/features/constraints/PairConstraintDialog'
 import { createClient } from '@/lib/supabase/client'
 
@@ -77,6 +77,9 @@ export default function ConstraintsPage() {
   const [pairDialogOpen, setPairDialogOpen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [customHolidays, setCustomHolidays] = useState<CustomHoliday[]>([])
+  const [newHolidayDate, setNewHolidayDate] = useState('')
+  const [newHolidayName, setNewHolidayName] = useState('')
 
   // スタッフ・シフト種別・ペア制約は月に関係なく一度だけ取得
   useEffect(() => {
@@ -91,6 +94,18 @@ export default function ConstraintsPage() {
       if (pairData) setPairs(pairData)
     }
     loadMasters()
+  }, [])
+
+  // カスタム休日は月に関係なく全件取得
+  useEffect(() => {
+    async function loadCustomHolidays() {
+      const { data } = await supabase
+        .from('custom_holidays')
+        .select('*')
+        .order('date')
+      if (data) setCustomHolidays(data as CustomHoliday[])
+    }
+    loadCustomHolidays()
   }, [])
 
   // 月が変わるたびに制約を読み込む
@@ -180,6 +195,37 @@ export default function ConstraintsPage() {
   async function handleDeletePair(id: string) {
     await supabase.from('staff_pair_constraints').delete().eq('id', id)
     setPairs((prev) => prev.filter((p) => p.id !== id))
+  }
+
+  async function handleAddCustomHoliday() {
+    if (!newHolidayDate || !newHolidayName.trim()) return
+    const { data, error } = await supabase
+      .from('custom_holidays')
+      .insert({ date: newHolidayDate, name: newHolidayName.trim() })
+      .select()
+      .single()
+    if (error) {
+      if (error.code === '23505') {
+        alert('この日付はすでに登録されています')
+      } else {
+        alert('登録に失敗しました')
+      }
+      return
+    }
+    if (data) {
+      const { data: refreshed } = await supabase
+        .from('custom_holidays')
+        .select('*')
+        .order('date')
+      if (refreshed) setCustomHolidays(refreshed as CustomHoliday[])
+      setNewHolidayDate('')
+      setNewHolidayName('')
+    }
+  }
+
+  async function handleDeleteCustomHoliday(id: string) {
+    await supabase.from('custom_holidays').delete().eq('id', id)
+    setCustomHolidays((prev) => prev.filter((h) => h.id !== id))
   }
 
   function setMinStaffingField(key: keyof MinStaffing, val: number) {
@@ -397,6 +443,66 @@ export default function ConstraintsPage() {
                 </div>
               )
             })}
+          </div>
+        )}
+      </section>
+
+      {/* カスタム休日 */}
+      <section className="rounded-xl border border-rose-100 bg-white p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-rose-400 shrink-0" />
+          <h2 className="text-sm font-semibold text-gray-700">カスタム休日（開院記念日・院内行事など）</h2>
+        </div>
+        {/* 追加フォーム */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Input
+            type="date"
+            value={newHolidayDate}
+            onChange={(e) => setNewHolidayDate(e.target.value)}
+            className="w-40"
+            aria-label="休日の日付"
+          />
+          <Input
+            type="text"
+            placeholder="例: 開院記念日"
+            value={newHolidayName}
+            onChange={(e) => setNewHolidayName(e.target.value)}
+            className="w-48"
+            aria-label="休日の名称"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddCustomHoliday() }}
+          />
+          <button
+            onClick={handleAddCustomHoliday}
+            disabled={!newHolidayDate || !newHolidayName.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-600 border border-rose-300 rounded-lg hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="カスタム休日を追加"
+          >
+            <Plus className="h-3.5 w-3.5" />追加
+          </button>
+        </div>
+        {/* 一覧 */}
+        {customHolidays.length === 0 ? (
+          <p className="text-sm text-gray-400 py-4 text-center">カスタム休日が設定されていません</p>
+        ) : (
+          <div className="space-y-2">
+            {customHolidays.map((holiday) => (
+              <div
+                key={holiday.id}
+                className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-red-200 bg-red-50"
+              >
+                <div className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="font-mono text-gray-500">{holiday.date}</span>
+                  <span className="font-medium">{holiday.name}</span>
+                </div>
+                <button
+                  onClick={() => handleDeleteCustomHoliday(holiday.id)}
+                  className="text-gray-400 hover:text-red-400 transition-colors ml-2"
+                  aria-label={`${holiday.name}を削除`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </section>
