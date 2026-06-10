@@ -239,7 +239,9 @@ function getShiftMinimums(
 
   const requiredDayByIndex = dayMeta.map((meta) => {
     let required = meta.isWeekend ? minWeekend : minDay
-    if (meta.isBathDay) required = Math.max(required, minBathDay)
+    // 風呂日最低人数は平日のみ適用。土日祝・カスタム休日と重なる日に適用すると
+    // min > max（休日上限）の矛盾制約が生成され、CSP全体が解なしになる
+    if (meta.isBathDay && !meta.isWeekend) required = Math.max(required, minBathDay)
     return required
   })
 
@@ -430,13 +432,38 @@ function addWarnings(args: {
   }
 }
 
-function checkFeasibility(
-  staff: StaffProfile[],
-  minNight: number,
-  daysInMonth: number,
-  requiredDayByIndex: number[],
-  dayMeta: DayMeta[],
-): string[] {
+function checkFeasibility(args: {
+  staff: StaffProfile[]
+  minNight: number
+  daysInMonth: number
+  requiredDayByIndex: number[]
+  maxDayByIndex: number[]
+  dayMeta: DayMeta[]
+  year: number
+  month: number
+  customHolidayDates?: string[]
+  shiftPreferences: Map<string, Map<number, 'day' | 'night'>>
+  fixedLeaveCodes: Map<string, Map<number, FixedLeaveCode>>
+  fixedOffDays: Map<string, Set<number>>
+  forcedAkeDays: Map<string, Set<number>>
+  pairConstraints: StaffPairConstraint[]
+}): string[] {
+  const {
+    staff,
+    minNight,
+    daysInMonth,
+    requiredDayByIndex,
+    maxDayByIndex,
+    dayMeta,
+    year,
+    month,
+    customHolidayDates,
+    shiftPreferences,
+    fixedLeaveCodes,
+    fixedOffDays,
+    forcedAkeDays,
+    pairConstraints,
+  } = args
   const issues: string[] = []
 
   // 夜勤供給チェック
@@ -462,6 +489,82 @@ function checkFeasibility(
       `（スタッフ ${staff.length} 人・夜勤 ${minNight} 人・明け ${minNight} 人を除くと最大 ${estimatedAvailable} 人）。` +
       `日勤の最低人数を減らすか、夜勤の最低人数を減らしてください。`,
     )
+  }
+
+  // 日別の min > max 矛盾チェック（風呂日×休日の重なり・最低/最高人数の設定ミスなど）
+  for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
+    if (requiredDayByIndex[dayIdx] > maxDayByIndex[dayIdx]) {
+      issues.push(
+        `${month}月${dayIdx + 1}日: 日勤の最低必要人数 ${requiredDayByIndex[dayIdx]} 人が上限 ${maxDayByIndex[dayIdx]} 人を超えています。` +
+        `制約設定の最低・最高人数（風呂日・土日祝の設定を含む）を見直してください。`,
+      )
+    }
+  }
+
+  // シフト希望と固定シフト（強制公休・明け・休暇申請・ハード定休日）の矛盾チェック
+  const customHolidaySet = new Set(customHolidayDates ?? [])
+  for (const member of staff) {
+    const prefs = shiftPreferences.get(member.id)
+    if (!prefs) continue
+    const memberFixedOff = fixedOffDays.get(member.id)
+    const memberForcedAke = forcedAkeDays.get(member.id)
+    const memberFixedLeaves = fixedLeaveCodes.get(member.id)
+    const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+    for (const [dayIdx, kind] of prefs) {
+      const label = kind === 'night' ? '夜勤' : '日勤'
+      const dayLabel = `${month}月${dayIdx + 1}日`
+      if (memberFixedOff?.has(dayIdx)) {
+        issues.push(
+          `${member.name}さんの${dayLabel}のシフト希望（${label}）は、前月末の夜勤明け後の強制公休と矛盾しています。` +
+          `シフト希望を削除するか、前月末のシフトを調整してください。`,
+        )
+        continue
+      }
+      if (memberForcedAke?.has(dayIdx)) {
+        issues.push(
+          `${member.name}さんの${dayLabel}のシフト希望（${label}）は、前月末の夜勤による「明け」と矛盾しています。` +
+          `シフト希望を削除するか、前月末のシフトを調整してください。`,
+        )
+        continue
+      }
+      if (memberFixedLeaves?.has(dayIdx)) {
+        issues.push(
+          `${member.name}さんの${dayLabel}には、シフト希望（${label}）と休暇申請が両方登録されています。どちらか一方を削除してください。`,
+        )
+        continue
+      }
+      const date = new Date(year, month - 1, dayIdx + 1)
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayIdx + 1).padStart(2, '0')}`
+      const isHoliday = HolidayJP.isHoliday(date) || customHolidaySet.has(dateStr)
+      if (hardOffDow.has(date.getDay()) || (member.hard_off_on_holidays && isHoliday)) {
+        issues.push(
+          `${member.name}さんの${dayLabel}のシフト希望（${label}）は、定休日（ハード）と矛盾しています。` +
+          `シフト希望を削除するか、定休日の設定を見直してください。`,
+        )
+      }
+    }
+  }
+
+  // must_not_pair ペアの両者が同じ日に同種のシフト希望を出していないかチェック
+  const staffNameById = new Map(staff.map((member) => [member.id, member.name]))
+  for (const pair of pairConstraints) {
+    if (pair.constraint_type !== 'must_not_pair') continue
+    const prefsA = shiftPreferences.get(pair.staff_id_a)
+    const prefsB = shiftPreferences.get(pair.staff_id_b)
+    if (!prefsA || !prefsB) continue
+    const nameA = staffNameById.get(pair.staff_id_a) ?? pair.staff_id_a
+    const nameB = staffNameById.get(pair.staff_id_b) ?? pair.staff_id_b
+    for (const [dayIdx, kindA] of prefsA) {
+      const kindB = prefsB.get(dayIdx)
+      if (!kindB || kindA !== kindB) continue
+      const targetsKind = kindA === 'night' ? pairTargetsNight(pair) : pairTargetsDay(pair)
+      if (!targetsKind) continue
+      const label = kindA === 'night' ? '夜勤' : '日勤'
+      issues.push(
+        `${nameA}さんと${nameB}さんは同日${label}禁止のペア制約がありますが、両者とも${month}月${dayIdx + 1}日に${label}のシフト希望が登録されています。` +
+        `どちらか一方のシフト希望を削除してください。`,
+      )
+    }
   }
 
   return issues
@@ -637,10 +740,14 @@ function solveSeniorFirstPass(
     }
 
     // 夜勤間隔制約（5回以下は連続夜勤禁止）
+    // 両日とも夜勤のシフト希望（GLP_FX固定）の場合は希望を優先して間隔制約を外す
     if (member.max_night_shifts >= 1 && member.max_night_shifts <= 5) {
+      const prefNightDays = new Set<number>()
+      memberPrefs?.forEach((kind, prefDayIdx) => { if (kind === 'night') prefNightDays.add(prefDayIdx) })
       const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         for (let k = 2; k <= minGap && dayIdx + k < daysInMonth; k++) {
+          if (prefNightDays.has(dayIdx) && prefNightDays.has(dayIdx + k)) continue
           addRow(
             `s1_night_spacing__${member.id}__${dayIdx}__${k}`,
             [
@@ -834,7 +941,22 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   )
 
   // 事前フィージビリティチェック：明らかに解けない場合を先に検出してわかりやすく伝える
-  const feasibilityIssues = checkFeasibility(staff, minNight, daysInMonth, requiredDayByIndex, dayMeta)
+  const feasibilityIssues = checkFeasibility({
+    staff,
+    minNight,
+    daysInMonth,
+    requiredDayByIndex,
+    maxDayByIndex,
+    dayMeta,
+    year,
+    month,
+    customHolidayDates,
+    shiftPreferences,
+    fixedLeaveCodes,
+    fixedOffDays,
+    forcedAkeDays,
+    pairConstraints,
+  })
   if (feasibilityIssues.length > 0) {
     return {
       grid,
@@ -1138,12 +1260,16 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     // 夜勤分散: 夜勤回数が少ないスタッフは最小間隔を設けて均等化
     // minGap = floor(daysInMonth / max_night_shifts) - 1（最低3）
     // n[D] + n[D+k] <= 1 for k in [2, minGap]（5回以下は連続夜勤も禁止）
+    // ただし両日とも夜勤のシフト希望（GLP_FX固定）の場合は希望を優先して間隔制約を外す
     if (member.max_night_shifts >= 1 && member.max_night_shifts <= 5) {
+      const prefNightDays = new Set<number>()
+      memberPrefs?.forEach((kind, prefDayIdx) => { if (kind === 'night') prefNightDays.add(prefDayIdx) })
       const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
       // 5回以下は連続夜勤禁止（k=2から）= 週1ペース・単独夜勤のみ
       const startK = 2
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         for (let k = startK; k <= minGap && dayIdx + k < daysInMonth; k++) {
+          if (prefNightDays.has(dayIdx) && prefNightDays.has(dayIdx + k)) continue
           addRow(
             `night_spacing__${member.id}__${dayIdx}__${k}`,
             [
