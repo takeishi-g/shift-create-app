@@ -162,10 +162,25 @@ export default function ShiftEditPage() {
   const [leaveEditTarget, setLeaveEditTarget] = useState<LeaveRequest | null>(null)
   const [leaveDeleteTarget, setLeaveDeleteTarget] = useState<LeaveRequest | null>(null)
   const [leaveCellPreset, setLeaveCellPreset] = useState<{ staff_id: string; date: string } | undefined>(undefined)
+  const [customHolidayDates, setCustomHolidayDates] = useState<string[]>([])
 
   useEffect(() => {
     selectedMonthRef.current = selectedMonth
   }, [selectedMonth])
+
+  useEffect(() => {
+    async function loadCustomHolidays() {
+      const [year, month] = selectedMonth.split('-').map(Number)
+      const lastDay = getDaysInMonth(new Date(year, month - 1))
+      const { data } = await supabase
+        .from('custom_holidays')
+        .select('date')
+        .gte('date', `${selectedMonth}-01`)
+        .lte('date', `${selectedMonth}-${String(lastDay).padStart(2, '0')}`)
+      if (data) setCustomHolidayDates(data.map((h: { date: string }) => h.date))
+    }
+    loadCustomHolidays()
+  }, [selectedMonth, supabase])
 
   // マスタデータ読み込み
   useEffect(() => {
@@ -339,11 +354,11 @@ export default function ShiftEditPage() {
       return {
         day: i + 1,
         dow: getDay(date),
-        isHoliday: HolidayJP.isHoliday(date),
+        isHoliday: HolidayJP.isHoliday(date) || customHolidayDates.includes(`${selectedMonth}-${String(i + 1).padStart(2, '0')}`),
         dateStr: `${selectedMonth}-${String(i + 1).padStart(2, '0')}`,
       }
     })
-  }, [selectedMonth])
+  }, [selectedMonth, customHolidayDates])
 
   // 月変更時: localStorage に保存済みセッションがあれば復元、なければ初期化
   useEffect(() => {
