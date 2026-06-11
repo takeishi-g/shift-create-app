@@ -34,6 +34,8 @@ type DayMeta = { isWeekend: boolean; isBathDay: boolean }
 type PrevMonthInfo = {
   forcedAkeDays: Map<string, Set<number>>
   fixedOffDays: Map<string, Set<number>>
+  /** 前月末が夜→明で終わった翌日: 公休または夜勤のみ可（夜→明→夜→明→休→休 の月跨ぎを許可） */
+  nightOrOffDays: Map<string, Set<number>>
   carryInWorkDays: Map<string, number>
 }
 
@@ -79,15 +81,17 @@ function buildPrevMonthInfo(
 ): PrevMonthInfo {
   const forcedAkeDays = new Map<string, Set<number>>()
   const fixedOffDays = new Map<string, Set<number>>()
+  const nightOrOffDays = new Map<string, Set<number>>()
   const carryInWorkDays = new Map<string, number>()
 
   for (const member of staff) {
     forcedAkeDays.set(member.id, new Set<number>())
     fixedOffDays.set(member.id, new Set<number>())
+    nightOrOffDays.set(member.id, new Set<number>())
     carryInWorkDays.set(member.id, 0)
   }
 
-  if (!prevMonthTail) return { forcedAkeDays, fixedOffDays, carryInWorkDays }
+  if (!prevMonthTail) return { forcedAkeDays, fixedOffDays, nightOrOffDays, carryInWorkDays }
 
   const byStaff = new Map<string, Map<number, string>>()
   const tailByStaff = new Map<string, Array<{ day: number; shift_code: string }>>()
@@ -127,16 +131,26 @@ function buildPrevMonthInfo(
 
     if (lastCode === '夜') {
       forcedAkeDays.get(member.id)?.add(0)
-      if (daysInMonth > 1) fixedOffDays.get(member.id)?.add(1)
+      if (secondLastCode === '明') {
+        // 前月末が2連続夜勤の末尾（…夜→明→夜）: 明→公→公 で2日公休を確保
+        if (daysInMonth > 1) fixedOffDays.get(member.id)?.add(1)
+        if (daysInMonth > 2) fixedOffDays.get(member.id)?.add(2)
+      } else if (daysInMonth > 1) {
+        // 夜→明 の翌日は公休または夜勤（夜→明→夜→明→休→休 の2連続夜勤を月跨ぎでも許可）
+        nightOrOffDays.get(member.id)?.add(1)
+      }
       continue
     }
 
     if (lastCode === '明' || secondLastCode === '夜') {
-      fixedOffDays.get(member.id)?.add(0)
+      // 前月末が夜→明: 当月1日は公休または夜勤
+      // 注: tail は前月末2日分のみのため、それが2連続夜勤の末尾（…夜→明→夜→明）か
+      // どうかは判定できない。その場合の「2日公休」は月内制約ではカバーされない
+      nightOrOffDays.get(member.id)?.add(0)
     }
   }
 
-  return { forcedAkeDays, fixedOffDays, carryInWorkDays }
+  return { forcedAkeDays, fixedOffDays, nightOrOffDays, carryInWorkDays }
 }
 
 function buildFixedLeaveData(leaveRequests: LeaveRequest[], year: number, month: number) {
@@ -445,6 +459,7 @@ function checkFeasibility(args: {
   shiftPreferences: Map<string, Map<number, 'day' | 'night'>>
   fixedLeaveCodes: Map<string, Map<number, FixedLeaveCode>>
   fixedOffDays: Map<string, Set<number>>
+  nightOrOffDays: Map<string, Set<number>>
   forcedAkeDays: Map<string, Set<number>>
   pairConstraints: StaffPairConstraint[]
 }): string[] {
@@ -461,6 +476,7 @@ function checkFeasibility(args: {
     shiftPreferences,
     fixedLeaveCodes,
     fixedOffDays,
+    nightOrOffDays,
     forcedAkeDays,
     pairConstraints,
   } = args
@@ -507,6 +523,7 @@ function checkFeasibility(args: {
     const prefs = shiftPreferences.get(member.id)
     if (!prefs) continue
     const memberFixedOff = fixedOffDays.get(member.id)
+    const memberNightOrOff = nightOrOffDays.get(member.id)
     const memberForcedAke = forcedAkeDays.get(member.id)
     const memberFixedLeaves = fixedLeaveCodes.get(member.id)
     const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
@@ -515,7 +532,14 @@ function checkFeasibility(args: {
       const dayLabel = `${month}月${dayIdx + 1}日`
       if (memberFixedOff?.has(dayIdx)) {
         issues.push(
-          `${member.name}さんの${dayLabel}のシフト希望（${label}）は、前月末の夜勤明け後の強制公休と矛盾しています。` +
+          `${member.name}さんの${dayLabel}のシフト希望（${label}）は、前月末の2連続夜勤後の強制公休と矛盾しています。` +
+          `シフト希望を削除するか、前月末のシフトを調整してください。`,
+        )
+        continue
+      }
+      if (kind === 'day' && memberNightOrOff?.has(dayIdx)) {
+        issues.push(
+          `${member.name}さんの${dayLabel}のシフト希望（日勤）は、前月末の夜勤明けと矛盾しています（夜勤明けの翌日は公休または夜勤のみ）。` +
           `シフト希望を削除するか、前月末のシフトを調整してください。`,
         )
         continue
@@ -586,6 +610,7 @@ function solveSeniorFirstPass(
   dayMeta: DayMeta[],
   forcedAkeDays: Map<string, Set<number>>,
   fixedOffDays: Map<string, Set<number>>,
+  nightOrOffDays: Map<string, Set<number>>,
   fixedLeaveCodes: Map<string, Map<number, FixedLeaveCode>>,
   shiftPreferences: Map<string, Map<number, 'day' | 'night'>>,
   personalTargetByStaff: Map<string, number>,
@@ -629,6 +654,7 @@ function solveSeniorFirstPass(
     const memberPrefs = shiftPreferences.get(member.id)
     const memberForcedAke = forcedAkeDays.get(member.id) ?? new Set<number>()
     const memberFixedOff = fixedOffDays.get(member.id) ?? new Set<number>()
+    const memberNightOrOff = nightOrOffDays.get(member.id) ?? new Set<number>()
     const carryInWork = carryInWorkDays.get(member.id) ?? 0
     const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
     const softOffDow = new Set(member.soft_off_days_of_week ?? [])
@@ -663,8 +689,28 @@ function solveSeniorFirstPass(
       const prevDayForcedOff = dayIdx > 0 && (
         memberFixedLeaves?.has(dayIdx - 1) === true ||
         memberFixedOff.has(dayIdx - 1) ||
+        memberNightOrOff.has(dayIdx - 1) ||
         prevDayHardOff
       )
+
+      // 前月末が夜→明で終わった翌日: 公休または夜勤のみ可（メインパスと同じ扱い）
+      if (memberNightOrOff.has(dayIdx) && !(memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay)) {
+        addRow(`s1_night_or_off__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 0, 0)
+        if (dayIdx + 2 < daysInMonth) {
+          addRow(
+            `s1_cross_double_night_off1__${member.id}__${dayIdx}`,
+            [{ name: varName('o', member.id, dayIdx + 2), coef: 1 }, { name: n, coef: -1 }],
+            glpk.GLP_LO, 0, 0,
+          )
+        }
+        if (dayIdx + 3 < daysInMonth) {
+          addRow(
+            `s1_cross_double_night_off2__${member.id}__${dayIdx}`,
+            [{ name: varName('o', member.id, dayIdx + 3), coef: 1 }, { name: n, coef: -1 }],
+            glpk.GLP_LO, 0, 0,
+          )
+        }
+      }
 
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`s1_forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
@@ -910,7 +956,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   const grid = emptyGrid(staff, daysInMonth)
   const dayMeta = buildDayMeta(year, month, daysInMonth, bathDayIndices, customHolidayDates)
   const targetOffDays = constraints?.target_off_days ?? dayMeta.filter(d => d.isWeekend).length
-  const { forcedAkeDays, fixedOffDays, carryInWorkDays } = buildPrevMonthInfo(staff, prevMonthTail, daysInMonth)
+  const { forcedAkeDays, fixedOffDays, nightOrOffDays, carryInWorkDays } = buildPrevMonthInfo(staff, prevMonthTail, daysInMonth)
   const { fixedLeaveCodes, shiftPreferences, paidLeaveCount } = buildFixedLeaveData(leaveRequests, year, month)
   const { minNight, maxNight, minWeekend, requiredDayByIndex, maxDayByIndex } = getShiftMinimums(constraints, shiftTypes, dayMeta, staff.length)
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
@@ -954,6 +1000,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     shiftPreferences,
     fixedLeaveCodes,
     fixedOffDays,
+    nightOrOffDays,
     forcedAkeDays,
     pairConstraints,
   })
@@ -1030,7 +1077,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   const frozenSeniorGrid: ShiftGrid | null = seniorStaffForPass1.length >= 2
     ? solveSeniorFirstPass(
         glpk, yearMonth, seniorStaffForPass1, daysInMonth, year, month, dayMeta,
-        forcedAkeDays, fixedOffDays, fixedLeaveCodes, shiftPreferences,
+        forcedAkeDays, fixedOffDays, nightOrOffDays, fixedLeaveCodes, shiftPreferences,
         personalTargetByStaff, nightTargetByStaff, maxConsecutive, carryInWorkDays,
       )
     : null
@@ -1055,6 +1102,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     const memberPrefs = shiftPreferences.get(member.id)
     const memberForcedAke = forcedAkeDays.get(member.id) ?? new Set<number>()
     const memberFixedOff = fixedOffDays.get(member.id) ?? new Set<number>()
+    const memberNightOrOff = nightOrOffDays.get(member.id) ?? new Set<number>()
     const carryInWork = carryInWorkDays.get(member.id) ?? 0
     const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
     const softOffDow = new Set(member.soft_off_days_of_week ?? [])
@@ -1123,8 +1171,30 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       const prevDayForcedOff = dayIdx > 0 && (
         memberFixedLeaves?.has(dayIdx - 1) === true ||
         memberFixedOff.has(dayIdx - 1) ||
+        memberNightOrOff.has(dayIdx - 1) ||
         prevDayHardOff
       )
+
+      // 前月末が夜→明で終わった翌日: 公休または夜勤のみ可（日勤を禁止）
+      // 夜→明→夜→明→休→休 の2連続夜勤パターンを月跨ぎでも許可する
+      if (memberNightOrOff.has(dayIdx) && !(memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay)) {
+        addRow(`night_or_off__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 0, 0)
+        // ここで夜勤を選んだ場合は2連続夜勤の末尾になるため、明けの後に2日公休を強制
+        if (dayIdx + 2 < daysInMonth) {
+          addRow(
+            `cross_double_night_off1__${member.id}__${dayIdx}`,
+            [{ name: varName('o', member.id, dayIdx + 2), coef: 1 }, { name: n, coef: -1 }],
+            glpk.GLP_LO, 0, 0,
+          )
+        }
+        if (dayIdx + 3 < daysInMonth) {
+          addRow(
+            `cross_double_night_off2__${member.id}__${dayIdx}`,
+            [{ name: varName('o', member.id, dayIdx + 3), coef: 1 }, { name: n, coef: -1 }],
+            glpk.GLP_LO, 0, 0,
+          )
+        }
+      }
 
       if (memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay) {
         addRow(`forced_off__${member.id}__${dayIdx}`, [{ name: o, coef: 1 }], glpk.GLP_FX, 1, 1)
