@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     supabase.from('shift_types').select('*').order('display_order'),
     tailFromBody ? Promise.resolve({ data: null }) :
       supabase.from('shift_assignments').select('staff_id, shift_code, date').in('date', [prevSecondLast, prevLastDay]),
-    supabase.from('staff_carry_overs').select('staff_id, carry_over_days').eq('to_month', year_month),
+    supabase.from('staff_carry_over').select('staff_id, carry_over_days').eq('to_month', year_month),
     supabase.from('custom_holidays').select('date').gte('date', monthStart).lte('date', monthEnd),
   ])
 

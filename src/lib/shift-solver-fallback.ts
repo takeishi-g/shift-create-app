@@ -93,8 +93,9 @@ function getDayRequirements(
   const minWeekend = constraints?.min_staff_weekend ?? minDay
   const maxWeekend = constraints?.max_staff_weekend ?? maxDay
   const minBathDay = constraints?.min_staff_bath_day ?? minDay
-  const requiredDay = bathSet.has(dayIdx)
-    ? Math.max(isWeekend ? minWeekend : minDay, minBathDay)
+  // 風呂日最低人数は平日のみ適用（土日祝・カスタム休日と重なる日は休日の人数設定を優先）
+  const requiredDay = bathSet.has(dayIdx) && !isWeekend
+    ? Math.max(minDay, minBathDay)
     : (isWeekend ? minWeekend : minDay)
   const dayLimit = isWeekend ? maxWeekend : maxDay
   const nightKey = nightShiftType?.name ?? '夜勤'
