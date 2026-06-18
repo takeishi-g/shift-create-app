@@ -172,6 +172,100 @@ function buildFixedLeaveData(leaveRequests: LeaveRequest[], year: number, month:
   return { fixedLeaveCodes, shiftPreferences, paidLeaveCount }
 }
 
+/**
+ * ハード夜勤希望（pref_night）が、夜勤分散免除後も構造的に満たせないケースを
+ * 生成前に検出し、具体名・具体日で警告する。「原因不明の infeasible」を防ぎ、
+ * 利用者が希望日や設定をピンポイントで直せるようにする。
+ */
+function collectHardNightRequestWarnings(args: {
+  staff: StaffProfile[]
+  shiftPreferences: Map<string, Map<number, 'day' | 'night'>>
+  fixedLeaveCodes: Map<string, Map<number, FixedLeaveCode>>
+  fixedOffDays: Map<string, Set<number>>
+  forcedAkeDays: Map<string, Set<number>>
+  pairConstraints: StaffPairConstraint[]
+  year: number
+  month: number
+  customHolidayDates: string[]
+}): string[] {
+  const { staff, shiftPreferences, fixedLeaveCodes, fixedOffDays, forcedAkeDays, pairConstraints, year, month, customHolidayDates } = args
+  const warnings: string[] = []
+  const holidaySet = new Set(customHolidayDates)
+  const md = (dayIdx: number) => `${month}/${dayIdx + 1}`
+  const nameById = new Map(staff.map((member) => [member.id, member.name]))
+  const nightDaysByStaff = new Map<string, number[]>()
+
+  for (const member of staff) {
+    const prefs = shiftPreferences.get(member.id)
+    if (!prefs) continue
+    const nightDays = [...prefs.entries()].filter(([, v]) => v === 'night').map(([d]) => d).sort((a, b) => a - b)
+    if (nightDays.length === 0) continue
+
+    const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+    const memberFixed = fixedLeaveCodes.get(member.id)
+    const memberOff = fixedOffDays.get(member.id) ?? new Set<number>()
+    const memberAke = forcedAkeDays.get(member.id) ?? new Set<number>()
+
+    // 希望日を「ソルバーが実際に夜勤固定する日（有効）」と「定休等で反映されない日」に分ける。
+    // pref_night は dayAlreadyForced（定休/祝/休み希望/前月繰越明け）の日には適用されないため、
+    // 上限・3連続・ペアの判定は有効な希望日のみで行う（無効日を数えると誤警告になる）。
+    // 2. 希望日が定休/祝/休み希望/明けと重複 → そのまま反映できないので警告
+    const effectiveNightDays: number[] = []
+    for (const d of nightDays) {
+      const date = new Date(year, month - 1, d + 1)
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d + 1).padStart(2, '0')}`
+      const isHoliday = HolidayJP.isHoliday(date) || holidaySet.has(dateStr)
+      const blocked =
+        hardOffDow.has(date.getDay()) ||
+        (member.hard_off_on_holidays && isHoliday) ||
+        memberFixed?.has(d) ||
+        memberOff.has(d) ||
+        memberAke.has(d)
+      if (blocked) {
+        warnings.push(`${member.name}さんの夜勤希望（${md(d)}）は定休日・休み希望・明けと重なるため反映できません。別の日にしてください。`)
+      } else {
+        effectiveNightDays.push(d)
+      }
+    }
+    nightDaysByStaff.set(member.id, effectiveNightDays)
+
+    // 1. 夜勤上限超過（有効な希望のみで判定）。night_cap ハード制約で infeasible になる
+    if (effectiveNightDays.length > member.max_night_shifts) {
+      warnings.push(`${member.name}さんの夜勤希望が ${effectiveNightDays.length} 件ありますが夜勤上限は ${member.max_night_shifts} 回です。上限を上げるか希望を ${member.max_night_shifts} 件以内にしてください。`)
+    }
+
+    // 3. 3連続夜勤（D・D+2・D+4 がすべて有効な夜勤希望）= 安全ルール max2_consecutive_night 違反。
+    //    重複する連鎖を多重報告しないよう、検出した連鎖の末尾（d+4）まではスキップする。
+    const daySet = new Set(effectiveNightDays)
+    let reportedThrough = -1
+    for (const d of effectiveNightDays) {
+      if (d <= reportedThrough) continue
+      if (daySet.has(d + 2) && daySet.has(d + 4)) {
+        warnings.push(`${member.name}さんの夜勤希望（${md(d)}・${md(d + 2)}・${md(d + 4)}）は3連続夜勤になり許可できません。間隔を空けてください。`)
+        reportedThrough = d + 4
+      }
+    }
+  }
+
+  // 4. 同日夜勤禁止ペアが同じ日に夜勤希望（衝突日はすべて報告）
+  for (const pair of pairConstraints) {
+    if (pair.constraint_type !== 'must_not_pair' || !pairTargetsNight(pair)) continue
+    const aDays = nightDaysByStaff.get(pair.staff_id_a)
+    const bDays = nightDaysByStaff.get(pair.staff_id_b)
+    if (!aDays || !bDays) continue
+    const bSet = new Set(bDays)
+    const conflicts = aDays.filter((d) => bSet.has(d))
+    if (conflicts.length === 0) continue
+    const nameA = nameById.get(pair.staff_id_a) ?? pair.staff_id_a
+    const nameB = nameById.get(pair.staff_id_b) ?? pair.staff_id_b
+    for (const d of conflicts) {
+      warnings.push(`ペア制約: ${md(d)} に ${nameA}さん・${nameB}さんが両方とも夜勤希望ですが、同日夜勤は禁止です。どちらかをずらしてください。`)
+    }
+  }
+
+  return warnings
+}
+
 function buildDayMeta(
   year: number,
   month: number,
@@ -549,8 +643,9 @@ function solveSeniorFirstPass(
       const isSoftOffDay =
         !isHardOffDay && (softOffDow.has(date.getDay()) || (member.soft_off_on_holidays && isHoliday))
 
-      if (pref === 'night') addRow(`s1_pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
-      if (pref === 'day') addRow(`s1_pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
+      const s1DayAlreadyForced = memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay || memberForcedAke.has(dayIdx)
+      if (pref === 'night' && !s1DayAlreadyForced) addRow(`s1_pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
+      if (pref === 'day' && !s1DayAlreadyForced) addRow(`s1_pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`s1_forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
 
       const prevDayHardOff = dayIdx > 0 ? (() => {
@@ -641,6 +736,8 @@ function solveSeniorFirstPass(
       const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         for (let k = 2; k <= minGap && dayIdx + k < daysInMonth; k++) {
+          // 夜勤分散（均等化）は、両端とも夜勤希望日のときだけ適用しない（本パスと同じ方針）
+          if (memberPrefs?.get(dayIdx) === 'night' && memberPrefs?.get(dayIdx + k) === 'night') continue
           addRow(
             `s1_night_spacing__${member.id}__${dayIdx}__${k}`,
             [
@@ -756,8 +853,20 @@ function solveSeniorFirstPass(
   }
 
   // シニア間の相互カバレッジ: 平日は必ず1名以上が日勤
+  // 前月繰越明け・希望休等で全シニアが強制不在の日はスキップ（pass2でwarning）
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
     if (dayMeta[dayIdx].isWeekend) continue
+    const allSeniorsForced = seniorStaff.every(m => {
+      const mForcedAke = forcedAkeDays.get(m.id) ?? new Set<number>()
+      const mFixedOff = fixedOffDays.get(m.id) ?? new Set<number>()
+      const mLeaves = fixedLeaveCodes.get(m.id)
+      const date = new Date(year, month - 1, dayIdx + 1)
+      const isHol = HolidayJP.isHoliday(date)
+      const hardDow = new Set(m.hard_off_days_of_week ?? [])
+      const isHardOff = hardDow.has(date.getDay()) || (m.hard_off_on_holidays && isHol)
+      return mForcedAke.has(dayIdx) || (mLeaves?.has(dayIdx) ?? false) || mFixedOff.has(dayIdx) || isHardOff
+    })
+    if (allSeniorsForced) continue
     addRow(
       `s1_senior_coverage__${dayIdx}`,
       seniorStaff.map((m) => ({ name: varName('w', m.id, dayIdx), coef: 1 })),
@@ -805,6 +914,12 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   const targetOffDays = constraints?.target_off_days ?? dayMeta.filter(d => d.isWeekend).length
   const { forcedAkeDays, fixedOffDays, carryInWorkDays } = buildPrevMonthInfo(staff, prevMonthTail, daysInMonth)
   const { fixedLeaveCodes, shiftPreferences, paidLeaveCount } = buildFixedLeaveData(leaveRequests, year, month)
+  // 夜勤希望（ハード）が構造的に満たせないケースを生成前に具体名で警告する。
+  // 全 return パスに含めるため独立変数で保持する（infeasible 時こそ原因提示が重要）。
+  const nightRequestWarnings = collectHardNightRequestWarnings({
+    staff, shiftPreferences, fixedLeaveCodes, fixedOffDays, forcedAkeDays,
+    pairConstraints, year, month, customHolidayDates: customHolidayDates ?? [],
+  })
   const { minNight, maxNight, minWeekend, requiredDayByIndex, maxDayByIndex } = getShiftMinimums(constraints, shiftTypes, dayMeta, staff.length)
   const maxConsecutive = constraints?.max_consecutive_work_days ?? 5
   const carryOverByStaff = input.carryOverByStaff ?? {}
@@ -838,7 +953,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   if (feasibilityIssues.length > 0) {
     return {
       grid,
-      warnings: feasibilityIssues,
+      warnings: [...nightRequestWarnings, ...feasibilityIssues],
       targetOffDays,
       solverStatus: 'supply-error',
     }
@@ -977,8 +1092,9 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         !isHardOffDay &&
         (softOffDow.has(date.getDay()) || (member.soft_off_on_holidays && isHoliday))
 
-      if (pref === 'night') addRow(`pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
-      if (pref === 'day') addRow(`pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
+      const dayAlreadyForced = memberFixedLeaves?.has(dayIdx) || memberFixedOff.has(dayIdx) || isHardOffDay || memberForcedAke.has(dayIdx)
+      if (pref === 'night' && !dayAlreadyForced) addRow(`pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
+      if (pref === 'day' && !dayAlreadyForced) addRow(`pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
       const isDefinedOffDay =
         hardOffDow.has(date.getDay()) ||
@@ -1144,6 +1260,11 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       const startK = 2
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         for (let k = startK; k <= minGap && dayIdx + k < daysInMonth; k++) {
+          // 夜勤分散（均等化）は、両端とも本人の夜勤希望日のときだけ適用しない。
+          // infeasible を起こすのは pref_night で両端が1に固定される行のみなので、
+          // その行だけ外せば必要十分。片端のみ希望の行は残し、枝刈り（求解速度）を維持する。
+          // これは公平性ルールであり安全ルールではない（3連続夜勤禁止・明け公休・上限・ペア禁止は別制約で維持）。
+          if (memberPrefs?.get(dayIdx) === 'night' && memberPrefs?.get(dayIdx + k) === 'night') continue
           addRow(
             `night_spacing__${member.id}__${dayIdx}__${k}`,
             [
@@ -1425,6 +1546,22 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
   if (seniorStaff.length > 0) {
     for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
       if (dayMeta[dayIdx].isWeekend) continue
+      // 前月繰越明け・希望休等で全シニアが強制不在の日はスキップしてwarning
+      const allSeniorsForced = seniorStaff.every(m => {
+        const mForcedAke = forcedAkeDays.get(m.id) ?? new Set<number>()
+        const mFixedOff = fixedOffDays.get(m.id) ?? new Set<number>()
+        const mLeaves = fixedLeaveCodes.get(m.id)
+        const date = new Date(year, month - 1, dayIdx + 1)
+        const isHol = HolidayJP.isHoliday(date)
+        const hardDow = new Set(m.hard_off_days_of_week ?? [])
+        const isHardOff = hardDow.has(date.getDay()) || (m.hard_off_on_holidays && isHol)
+        return mForcedAke.has(dayIdx) || (mLeaves?.has(dayIdx) ?? false) || mFixedOff.has(dayIdx) || isHardOff
+      })
+      if (allSeniorsForced) {
+        const dow = ['日','月','火','水','木','金','土'][new Date(year, month - 1, dayIdx + 1).getDay()]
+        warnings.push(`シニアペア制約スキップ: ${dayIdx + 1}日(${dow})は全シニアが出勤不可（前月繰越・希望休等）のため制約を緩和しました`)
+        continue
+      }
       addRow(
         `senior_day_coverage__${dayIdx}`,
         seniorStaff.map((member) => ({ name: varName('w', member.id, dayIdx), coef: 1 })),
@@ -1437,8 +1574,20 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
 
   for (const pair of pairConstraints) {
     if (pair.constraint_type === 'senior_pair') {
+      const pairMembers = [pair.staff_id_a, pair.staff_id_b].map(id => staff.find(m => m.id === id)).filter(Boolean) as StaffProfile[]
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         if (dayMeta[dayIdx].isWeekend) continue
+        // 両者が強制不在の日はスキップ（senior_day_coverage と同じ扱い）
+        if (pairMembers.length === 2 && pairMembers.every(m => {
+          const mForcedAke = forcedAkeDays.get(m.id) ?? new Set<number>()
+          const mFixedOff = fixedOffDays.get(m.id) ?? new Set<number>()
+          const mLeaves = fixedLeaveCodes.get(m.id)
+          const date = new Date(year, month - 1, dayIdx + 1)
+          const isHol = HolidayJP.isHoliday(date)
+          const hardDow = new Set(m.hard_off_days_of_week ?? [])
+          const isHardOff = hardDow.has(date.getDay()) || (m.hard_off_on_holidays && isHol)
+          return mForcedAke.has(dayIdx) || (mLeaves?.has(dayIdx) ?? false) || mFixedOff.has(dayIdx) || isHardOff
+        })) continue
         addRow(
           `senior_pair__${pair.staff_id_a}__${pair.staff_id_b}__${dayIdx}`,
           [
@@ -1575,7 +1724,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     }
     return {
       grid,
-      warnings: ['制約を同時に満たすシフトを生成できませんでした。夜勤人数・休日数・希望休の組み合わせを見直してください。'],
+      warnings: [...nightRequestWarnings, '制約を同時に満たすシフトを生成できませんでした。夜勤人数・休日数・希望休の組み合わせを見直してください。'],
       targetOffDays,
       solverStatus: 'infeasible',
     }
@@ -1603,5 +1752,5 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     personalTargetByStaff,
   })
 
-  return { grid, warnings, targetOffDays, solverStatus: 'success' }
+  return { grid, warnings: [...nightRequestWarnings, ...warnings], targetOffDays, solverStatus: 'success' }
 }
