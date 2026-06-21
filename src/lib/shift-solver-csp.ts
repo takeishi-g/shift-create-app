@@ -562,6 +562,52 @@ function checkFeasibility(
 }
 
 /**
+ * 定休スタッフの夜勤を「夜(D)→明(D+1)→公(D+2=定休)」に整合させるハード制約の対象か。
+ * 対象＝夜勤分散（均等化）免除と同一母集団: 夜勤回数が少なく(1〜5)、曜日定休 or 祝日定休がある人。
+ * 高夜勤(>5)は対象外（2連続夜勤ロジックと干渉させない）。
+ */
+function isHardAlignTarget(member: StaffProfile): boolean {
+  const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+  return (
+    member.max_night_shifts >= 1 &&
+    member.max_night_shifts <= 5 &&
+    (hardOffDow.size > 0 || member.hard_off_on_holidays)
+  )
+}
+
+/**
+ * idx日（0始まり、月外は翌月/前月へ自動ロールオーバー）が member の定休日（曜日定休 or 祝日定休）か。
+ * customHolidayDates は当月分しか持たないため、月外の日はカスタム休日を考慮しない（国民の祝日のみ）。
+ */
+function isDefinedOffIndex(
+  member: StaffProfile,
+  year: number,
+  month: number,
+  daysInMonth: number,
+  idx: number,
+  customHolidayDates?: string[],
+): boolean {
+  const hardOffDow = new Set(member.hard_off_days_of_week ?? [])
+  const dt = new Date(year, month - 1, idx + 1)
+  const inMonth = idx >= 0 && idx < daysInMonth
+  // 月外（翌月/前月）の日は customHolidayDates（当月分のみ保持）の対象外なので、dtStr 計算自体を月内に限定する。
+  const isHol =
+    HolidayJP.isHoliday(dt) ||
+    (inMonth &&
+      (customHolidayDates ?? []).includes(
+        `${year}-${String(month).padStart(2, '0')}-${String(idx + 1).padStart(2, '0')}`,
+      ))
+  return hardOffDow.has(dt.getDay()) || (member.hard_off_on_holidays && isHol)
+}
+
+/** ソルバーの制限時間（秒）。SHIFT_SOLVER_TMLIM で上書き可（既定30）。本番の低速環境向けに延長できる。
+ *  GLPK は秒単位整数を期待するため整数化し、不正値（NaN・0以下・小数のみ）は既定30に戻す。 */
+function solverTimeLimit(): number {
+  const raw = Math.floor(Number(process.env.SHIFT_SOLVER_TMLIM))
+  return Number.isFinite(raw) && raw >= 1 ? raw : 30
+}
+
+/**
  * Pass 1: シニアスタッフ（師長・主任）のみで LP を解き、最適な夜勤配置を先に確定する。
  * senior_day_coverage（平日に必ず1名以上が日勤）をハード制約として満たしながら、
  * isHardOffDay の定休日前夜勤誘導（dayIdx-2）を最大限に活かす。
@@ -583,6 +629,9 @@ function solveSeniorFirstPass(
   nightTargetByStaff: Map<string, number>,
   maxConsecutive: number,
   carryInWorkDays: Map<string, number>,
+  hardenAlignment: boolean,
+  tmlim: number,
+  customHolidayDates: string[] | undefined,
 ): ShiftGrid | null {
   if (seniorStaff.length === 0) return null
 
@@ -647,6 +696,18 @@ function solveSeniorFirstPass(
       if (pref === 'night' && !s1DayAlreadyForced) addRow(`s1_pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (pref === 'day' && !s1DayAlreadyForced) addRow(`s1_pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`s1_forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
+
+      // 定休整合のハード化（CONSTRAINTS.md §5）: 対象スタッフの夜勤は D+2 が定休日のときだけ許可。
+      // 希望夜勤日・既に確定済みの日（定休/明け/休暇）は除外。整合不能なら呼び出し側が hardenAlignment=false で再解。
+      if (
+        hardenAlignment &&
+        isHardAlignTarget(member) &&
+        pref !== 'night' &&
+        !s1DayAlreadyForced &&
+        !isDefinedOffIndex(member, year, month, daysInMonth, dayIdx + 2, customHolidayDates)
+      ) {
+        addRow(`s1_hard_align_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 0, 0)
+      }
 
       const prevDayHardOff = dayIdx > 0 ? (() => {
         const pd = new Date(year, month - 1, dayIdx)
@@ -891,7 +952,7 @@ function solveSeniorFirstPass(
 
   let s1Result: Awaited<ReturnType<GLPK['solve']>>
   try {
-    s1Result = glpk.solve(s1Lp, { msglev: glpk.GLP_MSG_OFF, presol: true, tmlim: 10 })
+    s1Result = glpk.solve(s1Lp, { msglev: glpk.GLP_MSG_OFF, presol: true, tmlim })
   } catch {
     return null
   }
@@ -910,12 +971,14 @@ function solveSeniorFirstPass(
   return seniorGrid
 }
 
-export async function generateShifts(input: SolverInput): Promise<SolverOutput> {
+export async function generateShifts(input: SolverInput, hardenAlignment = true): Promise<SolverOutput> {
   const { yearMonth, staff, constraints, leaveRequests, pairConstraints, shiftTypes, bathDayIndices, prevMonthTail, customHolidayDates } = input
   const warnings: string[] = []
 
   const [year, month] = yearMonth.split('-').map(Number)
   const daysInMonth = getDaysInMonth(new Date(year, month - 1))
+  const tmlim = solverTimeLimit()
+  const pass1Tmlim = Math.min(tmlim, 10)
   const grid = emptyGrid(staff, daysInMonth)
   const dayMeta = buildDayMeta(year, month, daysInMonth, bathDayIndices, customHolidayDates)
   const targetOffDays = constraints?.target_off_days ?? dayMeta.filter(d => d.isWeekend).length
@@ -1032,6 +1095,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         glpk, yearMonth, seniorStaffForPass1, daysInMonth, year, month, dayMeta,
         forcedAkeDays, fixedOffDays, fixedLeaveCodes, shiftPreferences,
         personalTargetByStaff, nightTargetByStaff, maxConsecutive, carryInWorkDays,
+        hardenAlignment, pass1Tmlim, customHolidayDates,
       )
     : null
 
@@ -1103,6 +1167,19 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
       if (pref === 'night' && !dayAlreadyForced) addRow(`pref_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (pref === 'day' && !dayAlreadyForced) addRow(`pref_day__${member.id}__${dayIdx}`, [{ name: w, coef: 1 }], glpk.GLP_FX, 1, 1)
       if (memberForcedAke.has(dayIdx)) addRow(`forced_ake__${member.id}__${dayIdx}`, [{ name: a, coef: 1 }], glpk.GLP_FX, 1, 1)
+
+      // 定休整合のハード化（CONSTRAINTS.md §5）: 対象スタッフの夜勤は D+2 が定休日のときだけ許可。
+      // 希望夜勤日・既に確定済みの日（定休/明け/休暇）は除外。整合不能なら hardenAlignment=false で再解（最悪でも従来挙動）。
+      if (
+        hardenAlignment &&
+        isHardAlignTarget(member) &&
+        pref !== 'night' &&
+        !dayAlreadyForced &&
+        !isDefinedOffIndex(member, year, month, daysInMonth, dayIdx + 2, customHolidayDates)
+      ) {
+        addRow(`hard_align_night__${member.id}__${dayIdx}`, [{ name: n, coef: 1 }], glpk.GLP_FX, 0, 0)
+      }
+
       const isDefinedOffDay =
         hardOffDow.has(date.getDay()) ||
         softOffDow.has(date.getDay()) ||
@@ -1722,7 +1799,7 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     solveResult = glpk.solve(lp, {
       msglev: glpk.GLP_MSG_OFF,
       presol: true,
-      tmlim: 30,
+      tmlim,
     })
   } catch {
     return {
@@ -1735,6 +1812,16 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
 
   const status = solveResult.result.status
   if (status !== glpk.GLP_OPT && status !== glpk.GLP_FEAS) {
+    // 定休整合のハード化（Part 1）で解けなくなった場合は、ハードを外して再解する安全網（Part 2）。
+    // 整合は崩れるが「最悪でも従来挙動」を保証する。再解は infeasible 時のみ（稀・presolで高速に判定）。
+    // フォールバックを使ったことを warnings で明示する（サイレント劣化を避ける／運用の透明性）。
+    if (hardenAlignment) {
+      const soft = await generateShifts(input, false)
+      return {
+        ...soft,
+        warnings: ['定休整合のハード制約を満たす解が見つからなかったため、ソフト誘導のみで再生成しました', ...soft.warnings],
+      }
+    }
     if (process.env.SHIFT_SOLVER_DEBUG === '1') {
       console.warn(
         '[shift-solver-csp] infeasible diagnostics',
