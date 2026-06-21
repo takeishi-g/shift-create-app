@@ -332,7 +332,7 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
       if (seniorCandidate) {
         grid[seniorCandidate.id][dayIdx] = '日'
       } else {
-        warnings.push(`${dayIdx + 1}日: シニアスタッフが全員夜勤・公休・有給のため日勤に配置できません。シニアの夜勤回数または定休日の設定を見直してください。`)
+        warnings.push(`シニアペア制約違反: ${dayIdx + 1}日にシニアスタッフが全員夜勤・公休・有給のため日勤に配置できません。シニアの夜勤回数または定休日の設定を見直してください。`)
         fallbackStatus = 'error'
       }
     }
