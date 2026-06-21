@@ -333,7 +333,10 @@ function getShiftMinimums(
 
   const requiredDayByIndex = dayMeta.map((meta) => {
     let required = meta.isWeekend ? minWeekend : minDay
-    if (meta.isBathDay) required = Math.max(required, minBathDay)
+    // 風呂日の最低人数は「平日のみ」適用する。土日祝に風呂曜日が重なると、必要人数(minBathDay)が
+    // その日の上限(maxWeekend)を上回り min>max の矛盾でCSP全体が infeasible になるため除外する
+    // （例: 祝日かつ水曜=風呂日 → 必要8人 > 上限3人）。docs/CONSTRAINTS.md §6 参照。
+    if (meta.isBathDay && !meta.isWeekend) required = Math.max(required, minBathDay)
     return required
   })
 
