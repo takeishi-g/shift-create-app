@@ -732,7 +732,14 @@ function solveSeniorFirstPass(
     }
 
     // 夜勤間隔制約（5回以下は連続夜勤禁止）
-    if (member.max_night_shifts >= 1 && member.max_night_shifts <= 5) {
+    // 定休スタッフ（曜日定休 or 祝日定休あり）は均等化を免除する。均等化は公平性ルールであり
+    // 安全ルールではない（CONSTRAINTS.md §7 の制約優先度表に存在しない実装ヒューリスティック）。
+    // 定休誘導(-15)が自動夜勤を定休の2日前へ寄せるのを均等化が阻むため、定休スタッフだけ外す。
+    if (
+      member.max_night_shifts >= 1 &&
+      member.max_night_shifts <= 5 &&
+      !(hardOffDow.size > 0 || member.hard_off_on_holidays)
+    ) {
       const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
       for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
         for (let k = 2; k <= minGap && dayIdx + k < daysInMonth; k++) {
@@ -1254,7 +1261,13 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
     // 夜勤分散: 夜勤回数が少ないスタッフは最小間隔を設けて均等化
     // minGap = floor(daysInMonth / max_night_shifts) - 1（最低3）
     // n[D] + n[D+k] <= 1 for k in [2, minGap]（5回以下は連続夜勤も禁止）
-    if (member.max_night_shifts >= 1 && member.max_night_shifts <= 5) {
+    // 定休スタッフは均等化を免除（Pass1 と同方針）。定休誘導(-15)で夜勤を定休隣接へ寄せ、
+    // post_night_off の公休が定休と重なり余分な公休を出さない（CONSTRAINTS.md §5）。
+    if (
+      member.max_night_shifts >= 1 &&
+      member.max_night_shifts <= 5 &&
+      !(hardOffDow.size > 0 || member.hard_off_on_holidays)
+    ) {
       const minGap = Math.max(3, Math.floor(daysInMonth / member.max_night_shifts) - 1)
       // 5回以下は連続夜勤禁止（k=2から）= 週1ペース・単独夜勤のみ
       const startK = 2
@@ -1419,21 +1432,38 @@ export async function generateShifts(input: SolverInput): Promise<SolverOutput> 
         }
       }
 
-      // 2連続夜勤（夜明夜明）のソフトペナルティ: n[D]+n[D+2]>=2 を嫌う
-      // consec_night_pen[D] >= n[D] + n[D+2] - 1
+      // 2連続夜勤（夜明夜明）を報酬: 回数が多いスタッフ（max_night>5）は2連続夜勤＋2連休を優先する（CONSTRAINTS.md §4）。
+      // db[D]=1 ⟺ n[D]=1 かつ n[D+2]=1（2連続夜勤が成立）。上限を n に縛る（db<=n[D], db<=n[D+2]）ため、
+      // 報酬の負係数でも db は unbounded にならず min(n[D],n[D+2]) に張り付く（両方夜勤のときだけ db=1）。
+      // 連続成立後の 夜明夜明公公 は post_night_off / max2_consecutive_night / double_night_second_off が自動付与する。
+      // 重み3: day_half(3)+consec_day_pen(2) を競合局面で上回りダブルを生むのに十分軽い均衡値。
+      // これ以上強める（例:6）と分岐限定法が報酬最大化の枝へ誘導され、制約が緩い大規模インスタンスで
+      // 最初の整数実行可能解の発見が30秒制限を超えて遅延する（軽い方がむしろダブルも増える）。
+      const DOUBLE_NIGHT_REWARD = 3
       for (let dayIdx = 0; dayIdx + 2 < daysInMonth; dayIdx++) {
-        const penName = `consec_night_pen__${member.id}__${dayIdx}`
-        addContinuous(penName)
-        addObjective(penName, 4)
+        const dbName = `double_night_reward__${member.id}__${dayIdx}`
+        addContinuous(dbName)
+        addObjective(dbName, -DOUBLE_NIGHT_REWARD)
+        // db <= n[D]
         addRow(
-          `consec_night_pen_row__${member.id}__${dayIdx}`,
+          `double_night_le_first__${member.id}__${dayIdx}`,
           [
-            { name: penName,                                  coef:  1 },
+            { name: dbName,                                   coef:  1 },
             { name: varName('n', member.id, dayIdx),          coef: -1 },
+          ],
+          glpk.GLP_UP,
+          0,
+          0,
+        )
+        // db <= n[D+2]
+        addRow(
+          `double_night_le_second__${member.id}__${dayIdx}`,
+          [
+            { name: dbName,                                   coef:  1 },
             { name: varName('n', member.id, dayIdx + 2),      coef: -1 },
           ],
-          glpk.GLP_LO,
-          -1,
+          glpk.GLP_UP,
+          0,
           0,
         )
       }
