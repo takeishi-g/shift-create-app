@@ -59,7 +59,6 @@ function generateMonths(): { value: string; label: string }[] {
 const MONTHS = generateMonths()
 const TODAY_MONTH = MONTHS[3].value
 
-const BATH_DAYS_KEY = 'shift-bath-days-dow'
 const DEFAULT_BATH_DAYS_DOW = [1, 4]
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
@@ -94,7 +93,7 @@ function qualBadgeClass(s: StaffProfile) {
 }
 
 export default function ShiftTablePage() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const printRef = useRef<HTMLDivElement>(null)
   const [selectedMonth, setSelectedMonth] = useState(TODAY_MONTH)
   const [bathDaysDow, setBathDaysDow] = useState<number[]>(DEFAULT_BATH_DAYS_DOW)
@@ -120,12 +119,19 @@ export default function ShiftTablePage() {
     loadStaff()
   }, [])
 
+  // 風呂曜日は制約設定(shift_constraints.bath_days_of_week)を単一の真実源とし、風呂マーカー表示に反映
+  // （月別→グローバル→既定）。以前はハードコード既定[1,4]のみで設定が無視され、月木に誤マーカーが出ていた。
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(BATH_DAYS_KEY)
-      if (stored) setBathDaysDow(JSON.parse(stored))
-    } catch {}
-  }, [])
+    async function loadBathDays() {
+      const [{ data: monthly }, { data: fallback }] = await Promise.all([
+        supabase.from('shift_constraints').select('bath_days_of_week').eq('year_month', selectedMonth).maybeSingle(),
+        supabase.from('shift_constraints').select('bath_days_of_week').is('year_month', null).limit(1).maybeSingle(),
+      ])
+      const bathDow = (monthly?.bath_days_of_week ?? fallback?.bath_days_of_week) as number[] | null | undefined
+      setBathDaysDow(Array.isArray(bathDow) ? bathDow : DEFAULT_BATH_DAYS_DOW)
+    }
+    loadBathDays()
+  }, [selectedMonth, supabase])
 
   // 選択月が変わるたびに当月のカスタム休日を取得
   useEffect(() => {
