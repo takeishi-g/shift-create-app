@@ -4,6 +4,14 @@ import { getDaysInMonth, getDay } from 'date-fns'
 import { generateShifts } from '@/lib/shift-solver'
 import { generateShiftsFallback } from '@/lib/shift-solver-fallback'
 
+// シフト生成はGLPKソルバーを同期実行するため時間がかかる。Vercel関数のデフォルト上限では
+// ソルバーの制限時間(tmlim)前に関数が打ち切られうるため、明示的に上限を延長する。
+// 探索時間自体は SHIFT_SOLVER_TMLIM（既定30秒）で制御。
+// 注: 定休整合をハードで解けない稀な月はソフトで再解する（二段求解）。通常は単段で約40秒以内に収まるが、
+//     再解が走る稀な月は最大で約2倍かかりうる。頻発する場合は SHIFT_SOLVER_TMLIM を下げるか、
+//     Pro プランで maxDuration を引き上げる。
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const year_month: string = body?.year_month ?? ''

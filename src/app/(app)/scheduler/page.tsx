@@ -91,7 +91,6 @@ const MONTHS = generateMonths()
 const TODAY_MONTH = MONTHS[3].value
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
-const BATH_DAYS_KEY = 'shift-bath-days-dow'
 const DEFAULT_BATH_DAYS_DOW = [1, 4]
 const sessionKey = (month: string) => `shift-session-${month}`
 
@@ -195,12 +194,14 @@ export default function ShiftEditPage() {
     loadMasters()
   }, [])
 
-  // 月変更時に target_off_days を取得（月別→デフォルトの順でフォールバック）
+  // 月変更時に target_off_days / 風呂曜日(bath_days_of_week) を取得（月別→グローバル→デフォルトの順）
+  // 風呂曜日は制約設定(shift_constraints.bath_days_of_week)を単一の真実源とし、シフト編集の
+  // 風呂日デフォルトに反映する（以前はハードコード既定のみで設定が無視されていた）。
   useEffect(() => {
-    async function loadTargetOffDays() {
+    async function loadMonthlyConstraints() {
       const [{ data: monthly }, { data: fallback }] = await Promise.all([
-        supabase.from('shift_constraints').select('target_off_days').eq('year_month', selectedMonth).maybeSingle(),
-        supabase.from('shift_constraints').select('target_off_days').is('year_month', null).limit(1).maybeSingle(),
+        supabase.from('shift_constraints').select('target_off_days, bath_days_of_week').eq('year_month', selectedMonth).maybeSingle(),
+        supabase.from('shift_constraints').select('target_off_days, bath_days_of_week').is('year_month', null).limit(1).maybeSingle(),
       ])
       const val = (monthly?.target_off_days ?? fallback?.target_off_days) as number | null | undefined
       if (val != null) {
@@ -209,17 +210,11 @@ export default function ShiftEditPage() {
         const [y, m] = selectedMonth.split('-').map(Number)
         setTargetOffDays(Math.round(getDaysInMonth(new Date(y, m - 1)) * 0.27))
       }
+      const bathDow = (monthly?.bath_days_of_week ?? fallback?.bath_days_of_week) as number[] | null | undefined
+      setBathDaysDow(Array.isArray(bathDow) ? bathDow : DEFAULT_BATH_DAYS_DOW)
     }
-    loadTargetOffDays()
-  }, [selectedMonth])
-
-  // お風呂の曜日をlocalStorageから読み込む
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(BATH_DAYS_KEY)
-      if (stored) setBathDaysDow(JSON.parse(stored))
-    } catch {}
-  }, [])
+    loadMonthlyConstraints()
+  }, [selectedMonth, supabase])
 
   // 月変更時に繰越休日数を読み込む
   useEffect(() => {

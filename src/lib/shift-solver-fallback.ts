@@ -93,8 +93,11 @@ function getDayRequirements(
   const minWeekend = constraints?.min_staff_weekend ?? minDay
   const maxWeekend = constraints?.max_staff_weekend ?? maxDay
   const minBathDay = constraints?.min_staff_bath_day ?? minDay
-  const requiredDay = bathSet.has(dayIdx)
-    ? Math.max(isWeekend ? minWeekend : minDay, minBathDay)
+  // 風呂日最低人数は「平日のみ」適用（CSP側 getShiftMinimums と対称）。土日祝の風呂日に minBathDay を
+  // 課すと、その日の上限(maxWeekend)を上回り requiredDay>dayLimit になりベストエフォート生成が破綻するため除外。
+  // 詳細は docs/CONSTRAINTS.md §6。
+  const requiredDay = bathSet.has(dayIdx) && !isWeekend
+    ? Math.max(minDay, minBathDay)
     : (isWeekend ? minWeekend : minDay)
   const dayLimit = isWeekend ? maxWeekend : maxDay
   const nightKey = nightShiftType?.name ?? '夜勤'
