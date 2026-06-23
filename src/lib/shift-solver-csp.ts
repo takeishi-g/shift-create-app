@@ -1122,10 +1122,12 @@ export async function generateShifts(input: SolverInput, hardenAlignment = true)
   // fairShare = ⌈土日祝の必要日勤数 / 週末稼働スタッフ数⌉ を超える土日祝日勤に片側ペナルティを課す。
   // 土日固定休（hard_off に 0=日 と 6=土 の両方）スタッフはプール外（プールに入れると無意味な行が増え、
   // また均等化の母数を歪めるため除外）。詳細は docs/CONSTRAINTS.md §3。
-  // 重みは「軽く」保つ: 強すぎると分枝限定法が公平化の枝へ誘導され、規模の大きい月で最初の整数実行可能解の
-  // 発見が tmlim を超えて infeasible 退行する（DOUBLE_NIGHT_REWARD のコメントと同じ理由）。グロスな偏在
-  // （例: 6/8 を担当）を崩すには軽い重みで十分（公平化は再配分が安価なため低重みでも効く）。
-  const WEEKEND_FAIRNESS_WEIGHT = 2
+  // 実装方式: 主求解では「ハード上限」を使う。希望が多く重い月（実データの7月など）は低速環境で
+  // tmlim 内に最適解へ到達できず GLP_FEAS（非最適の実行可能解）が返るため、ソフトのペナルティでは
+  // 公平化が最適化されず効かない（重みを上げても改善しないことを実データで確認）。ハード上限なら
+  // どの実行可能解でも必ず守られる。上限で解けない稀な月は hardenAlignment=false の再解でソフトに緩める。
+  const WEEKEND_FAIRNESS_WEIGHT = 2          // 再解（ソフト）経路の重み
+  const WEEKEND_FAIRNESS_MARGIN = 1          // ハード上限 = fairShare + margin（緩め。+1で7月は上名6→4）
   const weekendDayIdxs = dayMeta.flatMap((meta, dayIdx) => (meta.isWeekend ? [dayIdx] : []))
   const weekendDaySlots = weekendDayIdxs.reduce((sum, dayIdx) => sum + requiredDayByIndex[dayIdx], 0)
   const weekendEligibleIds = new Set(
@@ -1137,6 +1139,9 @@ export async function generateShifts(input: SolverInput, hardenAlignment = true)
       .map((member) => member.id),
   )
   const weekendFairShare = Math.max(1, Math.ceil(weekendDaySlots / Math.max(1, weekendEligibleIds.size)))
+  // ハード上限は fairShare+1。E×(⌈Wk/E⌉+1) ≥ Wk は常に成立するため、上限が単独で被覆(土日の必要人数)を
+  // 満たせなくすることはない。infeasible になるのは固定休・希望休・連勤上限など他制約が積み重なった時のみで、
+  // その場合は hardenAlignment=false の二段目でソフトに緩和される（margin=0 でも同様の衝突は起きうる）。
 
   for (const member of staff) {
     const memberFixedLeaves = fixedLeaveCodes.get(member.id)
@@ -1485,19 +1490,31 @@ export async function generateShifts(input: SolverInput, hardenAlignment = true)
     // 当人の公休は平日へ移るだけなので off_target（総数）は不変。day_bal と同形の片側 GLP_LO。
     // 土日固定休スタッフはプール外（週末日勤が常に0で行が無意味）なのでスキップする。
     if (weekendDayIdxs.length > 0 && weekendEligibleIds.has(member.id)) {
-      const weekendOver = `weekend_work_over__${member.id}`
-      addContinuous(weekendOver)
-      addObjective(weekendOver, WEEKEND_FAIRNESS_WEIGHT)
-      addRow(
-        `weekend_work_fair__${member.id}`,
-        [
-          { name: weekendOver, coef: 1 },
-          ...weekendDayIdxs.map((dayIdx) => ({ name: varName('w', member.id, dayIdx), coef: -1 })),
-        ],
-        glpk.GLP_LO,
-        -weekendFairShare,
-        0,
-      )
+      if (hardenAlignment) {
+        // 主求解: ハード上限 (fairShare + margin)。時間切れの GLP_FEAS でも必ず守られる。
+        addRow(
+          `weekend_work_cap__${member.id}`,
+          weekendDayIdxs.map((dayIdx) => ({ name: varName('w', member.id, dayIdx), coef: 1 })),
+          glpk.GLP_UP,
+          0,
+          weekendFairShare + WEEKEND_FAIRNESS_MARGIN,
+        )
+      } else {
+        // 再解経路(hardenAlignment=false): 上限起因の infeasible を避けるため公平化をソフトに緩める。
+        const weekendOver = `weekend_work_over__${member.id}`
+        addContinuous(weekendOver)
+        addObjective(weekendOver, WEEKEND_FAIRNESS_WEIGHT)
+        addRow(
+          `weekend_work_fair__${member.id}`,
+          [
+            { name: weekendOver, coef: 1 },
+            ...weekendDayIdxs.map((dayIdx) => ({ name: varName('w', member.id, dayIdx), coef: -1 })),
+          ],
+          glpk.GLP_LO,
+          -weekendFairShare,
+          0,
+        )
+      }
     }
 
     const nightPos = `night_pos__${member.id}`
@@ -1863,7 +1880,7 @@ export async function generateShifts(input: SolverInput, hardenAlignment = true)
       const soft = await generateShifts(input, false)
       return {
         ...soft,
-        warnings: ['定休整合のハード制約を満たす解が見つからなかったため、ソフト誘導のみで再生成しました', ...soft.warnings],
+        warnings: ['定休整合または土日公平化のハード制約を満たす解が見つからなかったため、制約を緩めて再生成しました', ...soft.warnings],
       }
     }
     if (process.env.SHIFT_SOLVER_DEBUG === '1') {
