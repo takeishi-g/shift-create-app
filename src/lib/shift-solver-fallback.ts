@@ -325,6 +325,20 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
   // carryOver を Phase 3 で参照するため先に定義
   const carryOverByStaff = input.carryOverByStaff ?? {}
   let fallbackStatus: SolverOutput['solverStatus'] = 'success'
+  // 土日祝の日勤公平化（CSP側 weekend_work_fair と対称）: これまでに割り当てた土日祝日勤の回数を保持し、
+  // 土日祝の日勤候補は「土日祝日勤が少ない人」を優先して偏りを防ぐ。
+  const weekendWorkCount = new Map<string, number>(staff.map((member) => [member.id, 0]))
+  // fairShare = ⌈土日祝の必要日勤数 / 週末稼働スタッフ数⌉。Phase4 で最低人数を超える土日日勤の偏りを抑える基準。
+  let weekendDaySlots = 0
+  for (let d = 0; d < daysInMonth; d++) {
+    const req = getDayRequirements(constraints, shiftTypes, d, year, month, bathSet, customHolidayDates)
+    if (req.isWeekend) weekendDaySlots += req.requiredDay
+  }
+  const weekendEligibleCount = staff.filter((member) => {
+    const ho = member.hard_off_days_of_week ?? []
+    return !(ho.includes(0) && ho.includes(6))
+  }).length
+  const weekendFairShare = Math.max(1, Math.ceil(weekendDaySlots / Math.max(1, weekendEligibleCount)))
   for (let dayIdx = 0; dayIdx < daysInMonth; dayIdx++) {
     const { requiredDay, dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
 
@@ -350,12 +364,19 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
         const rightTarget = targetOffDays + (paidLeaveCountByStaff.get(right.id) ?? 0) + (carryOverByStaff[right.id] ?? 0)
         const leftSlack = leftTarget - grid[left.id].filter((s) => isOff(s) || s === '明').length
         const rightSlack = rightTarget - grid[right.id].filter((s) => isOff(s) || s === '明').length
+        // 土日祝はまず「土日祝日勤が少ない人」を優先（公平化）。同数なら従来どおり余裕(slack)順。
+        if (isWeekend) {
+          const leftWeekend = weekendWorkCount.get(left.id) ?? 0
+          const rightWeekend = weekendWorkCount.get(right.id) ?? 0
+          if (leftWeekend !== rightWeekend) return leftWeekend - rightWeekend
+        }
         return rightSlack - leftSlack
       })
 
     for (const candidate of dayCandidates) {
       if (dayCount >= requiredDay || dayCount >= dayLimit) break
       grid[candidate.id][dayIdx] = '日'
+      if (isWeekend) weekendWorkCount.set(candidate.id, (weekendWorkCount.get(candidate.id) ?? 0) + 1)
       dayCount += 1
     }
   }
@@ -374,15 +395,22 @@ export async function generateShiftsFallback(input: SolverInput): Promise<Solver
         continue
       }
 
-      const { dayLimit } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
+      const { dayLimit, isWeekend } = getDayRequirements(constraints, shiftTypes, dayIdx, year, month, bathSet, customHolidayDates)
       const currentDayCount = staff.filter((candidate) => grid[candidate.id][dayIdx] === '日').length
-      if (currentDayCount < dayLimit && canAssignDay(grid, member.id, dayIdx, maxConsecutive)) {
+      // 土日祝で既に fairShare 分を担当しているスタッフには、最低人数を超える追加の土日日勤を割り当てない
+      // （Phase3 と同じ公平化。max_staff_weekend > min_staff_weekend の月で偏りが残らないようにする）。
+      const weekendCapReached = isWeekend && (weekendWorkCount.get(member.id) ?? 0) >= weekendFairShare
+      if (currentDayCount < dayLimit && !weekendCapReached && canAssignDay(grid, member.id, dayIdx, maxConsecutive)) {
         grid[member.id][dayIdx] = '日'
+        if (isWeekend) weekendWorkCount.set(member.id, (weekendWorkCount.get(member.id) ?? 0) + 1)
       } else {
         grid[member.id][dayIdx] = '公'
-        const days = retreatDays.get(member.id) ?? []
-        days.push(dayIdx + 1)
-        retreatDays.set(member.id, days)
+        // 公平化キャップによる意図的な公休は「日勤上限到達による退避」ではないため退避警告に含めない。
+        if (!weekendCapReached) {
+          const days = retreatDays.get(member.id) ?? []
+          days.push(dayIdx + 1)
+          retreatDays.set(member.id, days)
+        }
       }
     }
   }
